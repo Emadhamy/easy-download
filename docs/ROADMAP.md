@@ -6,16 +6,20 @@
 - [x] Add basic HTTP(S) URL validation
 - [x] Define a typed download queue model (UI/domain only)
 - [x] Write unit tests for progress and task state helpers (not yet executed)
-- [ ] Run Flutter formatting, analysis, and tests on a development machine
+- [x] Add GitHub Actions workflow for Flutter and Rust checks (run status not yet confirmed)
+- [ ] Run Flutter formatting, analysis, and tests and fix any reported errors
 - [ ] Run Rust tests and confirm the toolchain setup
 - [ ] Choose and implement the Flutter–Rust bridge
 
 ## Phase 2 — Direct downloads
-- [ ] Create a download job model and queue
-- [ ] Implement real HTTP(S) file downloads in Rust
-- [ ] Report progress, speed, and errors
+- [x] Write initial Rust HTTP(S) download function (not yet executed or verified)
+- [x] Add chunked response streaming and a progress callback (not yet executed or verified)
+- [ ] Connect Rust download functions to Flutter through a typed bridge
+- [ ] Create and manage real download jobs and queue
+- [ ] Display progress, speed, and errors in the UI
 - [ ] Add pause, resume, cancel, and retry
 - [ ] Persist jobs across app restarts
+- [ ] Safely finalize partial downloads and handle destination conflicts
 
 ## Phase 3 — Platform support
 - [ ] Verify Android storage and background execution
@@ -28,4 +32,4 @@
 - [ ] Add browser integration and link handoff
 
 ## Definition of done
-A feature is complete only after it builds and has been tested on its target platform. UI placeholders do not count as implemented functionality.
+A feature is complete only after it builds and has been tested on its target platform. UI placeholders and unverified code do not count as verified functionality.
