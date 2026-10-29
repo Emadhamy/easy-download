@@ -4,6 +4,8 @@
 - [x] Create Flutter app scaffold and dark dashboard
 - [x] Create initial Rust core crate
 - [x] Add basic HTTP(S) URL validation
+- [x] Define a typed download queue model (UI/domain only)
+- [x] Write unit tests for progress and task state helpers (not yet executed)
 - [ ] Run Flutter formatting, analysis, and tests on a development machine
 - [ ] Run Rust tests and confirm the toolchain setup
 - [ ] Choose and implement the Flutter–Rust bridge
