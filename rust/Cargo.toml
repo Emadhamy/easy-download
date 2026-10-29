@@ -1,0 +1,11 @@
+[package]
+name = "easy_download_core"
+version = "0.1.0"
+edition = "2021"
+description = "Core types and URL validation for Easy Download"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+url = "2.5"
