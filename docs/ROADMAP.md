@@ -9,12 +9,12 @@
 - [x] Add GitHub Actions workflow for Flutter and Rust checks (run status not yet confirmed)
 - [ ] Run Flutter formatting, analysis, and tests and fix any reported errors
 - [ ] Run Rust tests and confirm the toolchain setup
-- [ ] Choose and implement the Flutter–Rust bridge
+- [x] Choose the bridge approach: `flutter_rust_bridge` v2 (integration still pending)
 
 ## Phase 2 — Direct downloads
 - [x] Write initial Rust HTTP(S) download function (not yet executed or verified)
 - [x] Add chunked response streaming and a progress callback (not yet executed or verified)
-- [ ] Connect Rust download functions to Flutter through a typed bridge
+- [ ] Generate and integrate `flutter_rust_bridge` bindings for the bridge API
 - [ ] Create and manage real download jobs and queue
 - [ ] Display progress, speed, and errors in the UI
 - [ ] Add pause, resume, cancel, and retry
