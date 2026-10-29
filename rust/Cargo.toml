@@ -2,10 +2,11 @@
 name = "easy_download_core"
 version = "0.1.0"
 edition = "2021"
-description = "Core types and URL validation for Easy Download"
+description = "Core types and direct HTTP(S) download support for Easy Download"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
 url = "2.5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
