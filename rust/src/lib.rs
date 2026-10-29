@@ -1,9 +1,9 @@
 //! Core utilities and direct HTTP(S) download support for Easy Download.
 //!
-//! The Rust download function is not connected to the Flutter interface yet.
+//! The Rust download functions are not connected to the Flutter interface yet.
 
 use std::fs::File;
-use std::io;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use reqwest::blocking::Client;
@@ -37,13 +37,17 @@ impl DownloadUrl {
 
 /// Downloads a direct HTTP(S) URL to the destination file.
 ///
-/// This first version streams the response into a file and returns the number
-/// of bytes written. It does not yet support pause/resume, progress events,
-/// retries, or integration with the Flutter UI.
-pub fn download_to_path(
+/// The callback receives (bytes_received, total_bytes). The total is None if
+/// the server does not provide a Content-Length header. This function streams
+/// data in chunks rather than loading the entire response into memory.
+pub fn download_to_path_with_progress<F>(
     input_url: &str,
     destination: impl AsRef<Path>,
-) -> Result<u64, String> {
+    mut on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(u64, Option<u64>),
+{
     let url = DownloadUrl::parse(input_url)?;
     let client = Client::builder()
         .build()
@@ -55,16 +59,48 @@ pub fn download_to_path(
         .and_then(|response| response.error_for_status())
         .map_err(|error| format!("Download request failed: {error}"))?;
 
+    let total_bytes = response.content_length();
     let mut output = File::create(destination.as_ref())
         .map_err(|error| format!("Could not create destination file: {error}"))?;
 
-    io::copy(&mut response, &mut output)
-        .map_err(|error| format!("Could not write downloaded data: {error}"))
+    let mut received_bytes = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+
+    loop {
+        let bytes_read = response
+            .read(&mut buffer)
+            .map_err(|error| format!("Could not read download response: {error}"))?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        output
+            .write_all(&buffer[..bytes_read])
+            .map_err(|error| format!("Could not write downloaded data: {error}"))?;
+
+        received_bytes += bytes_read as u64;
+        on_progress(received_bytes, total_bytes);
+    }
+
+    output
+        .flush()
+        .map_err(|error| format!("Could not flush destination file: {error}"))?;
+
+    Ok(received_bytes)
+}
+
+/// Downloads a direct HTTP(S) URL to a file and returns the number of bytes
+/// written. Use `download_to_path_with_progress` to observe progress.
+pub fn download_to_path(
+    input_url: &str,
+    destination: impl AsRef<Path>,
+) -> Result<u64, String> {
+    download_to_path_with_progress(input_url, destination, |_, _| {})
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{download_to_path, DownloadUrl};
+    use super::{download_to_path, download_to_path_with_progress, DownloadUrl};
 
     #[test]
     fn accepts_https_url() {
@@ -84,5 +120,17 @@ mod tests {
             "/tmp/easy-download-invalid-scheme-test.zip",
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn progress_downloader_rejects_invalid_scheme_before_callback() {
+        let mut callback_called = false;
+        let result = download_to_path_with_progress(
+            "file:///tmp/example.zip",
+            "/tmp/easy-download-invalid-scheme-progress-test.zip",
+            |_, _| callback_called = true,
+        );
+        assert!(result.is_err());
+        assert!(!callback_called);
     }
 }
