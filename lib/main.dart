@@ -25,11 +25,6 @@ class EasyDownloadApp extends StatelessWidget {
           brightness: Brightness.dark,
           surface: panel,
         ),
-        cardTheme: const CardTheme(
-          color: panel,
-          elevation: 0,
-          margin: EdgeInsets.zero,
-        ),
       ),
       home: const DownloadHomePage(),
     );
@@ -178,7 +173,7 @@ class _EmptyState extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: const Color(0xFF8B5CF6).withValues(alpha: 0.14),
+                color: const Color(0xFF8B5CF6).withOpacity(0.14),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.download_for_offline_outlined, size: 32, color: Color(0xFF8B5CF6)),
