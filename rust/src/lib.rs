@@ -1,6 +1,6 @@
-//! Core utilities and direct HTTP(S) download support for Easy Download.
-//!
-//! The Rust download functions are not connected to the Flutter interface yet.
+// Core utilities and direct HTTP(S) download support for Easy Download.
+//
+// The Rust download functions are not connected to the Flutter interface yet.
 
 pub mod api;
 
