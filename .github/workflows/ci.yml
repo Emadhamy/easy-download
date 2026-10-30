@@ -42,11 +42,11 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android NDK
-        run: sdkmanager "ndk;27.0.12077973"
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager --install "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
