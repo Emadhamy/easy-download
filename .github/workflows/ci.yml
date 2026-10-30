@@ -40,6 +40,12 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Flutter for bridge generation
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
       - name: Install Flutter Rust Bridge code generator
         run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
 
