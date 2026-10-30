@@ -30,6 +30,40 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
+  android-rust-build:
+    name: Build Rust core for Android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust with Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build Rust core for Android ARM64
+        working-directory: rust
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+        run: cargo ndk -t arm64-v8a -o ../build/android/jniLibs build --release
+
+      - name: Upload Android native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-download-android-arm64
+          path: build/android/jniLibs/
+          if-no-files-found: error
+
   rust-check:
     name: Rust tests and bridge generation
     runs-on: ubuntu-latest
