@@ -43,21 +43,9 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Install Android NDK
-        shell: bash
-        run: |
-          set -euo pipefail
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDKMANAGER="$(find "$SDK_ROOT" -type f -name sdkmanager -perm -u+x -print -quit)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager was not found under $SDK_ROOT"
-            echo "ANDROID_HOME=${ANDROID_HOME:-not-set}"
-            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-not-set}"
-            exit 1
-          fi
-          echo "Using SDK manager: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses
-          "$SDKMANAGER" --install "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+        uses: android-actions/setup-ndk@v3
+        with:
+          ndk-version: 27.0.12077973
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
