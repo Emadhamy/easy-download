@@ -6,6 +6,7 @@ description = "Core types and direct HTTP(S) download support for Easy Download"
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 flutter_rust_bridge = "2.12.0"
