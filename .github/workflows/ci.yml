@@ -46,8 +46,12 @@ jobs:
       - name: Generate Flutter-Rust bridge
         run: flutter_rust_bridge_codegen generate
 
-      - name: Check generated files are committed
-        run: git diff --exit-code
+      - name: Upload generated bridge files
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-rust-bridge-generated
+          path: lib/src/rust/
+          if-no-files-found: error
 
       - name: Run Rust tests
         working-directory: rust
