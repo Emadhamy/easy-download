@@ -31,11 +31,8 @@ jobs:
         run: flutter test
 
   rust-check:
-    name: Rust tests
+    name: Rust tests and bridge generation
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rust
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -43,5 +40,15 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Flutter Rust Bridge code generator
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: Generate Flutter-Rust bridge
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Check generated files are committed
+        run: git diff --exit-code
+
       - name: Run Rust tests
+        working-directory: rust
         run: cargo test
