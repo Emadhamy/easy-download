@@ -140,76 +140,122 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Widget build(BuildContext context) {
     const violet = Color(0xFF8B5CF6);
     const muted = Color(0xFF9A9AAF);
-    final activeCount = 0;
-    final completedCount = 0;
+    const panel = Color(0xFF151525);
+    final queuedCount = _links.length;
 
     return Scaffold(
       appBar: AppBar(
+        titleSpacing: 20,
         title: const Row(
           children: [
             Icon(Icons.downloading_rounded, color: violet, size: 29),
             SizedBox(width: 10),
             Text('Easy Download',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+                style: TextStyle(fontWeight: FontWeight.w800)),
           ],
         ),
         actions: [
           IconButton(
-            tooltip: 'Settings (coming soon)',
+            tooltip: 'Settings',
             onPressed: () => _showNotice(context),
-            icon: const Icon(Icons.settings_outlined),
+            icon: const Icon(Icons.tune_rounded),
           ),
           const SizedBox(width: 8),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addLink,
-        icon: const Icon(Icons.add_link_rounded),
-        label: const Text('New download'),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add download'),
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 100),
           children: [
-            const Text(
-              'Your downloads,\nall in one place.',
-              style: TextStyle(
-                  fontSize: 28, height: 1.15, fontWeight: FontWeight.w800),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF29204A), Color(0xFF171727)],
+                ),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: violet.withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: violet.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: const Text(
+                      'DOWNLOAD MANAGER',
+                      style: TextStyle(
+                        color: Color(0xFFD4C5FF),
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Everything you\nwant to keep.',
+                    style: TextStyle(
+                      fontSize: 30,
+                      height: 1.12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  const Text(
+                    'Collect your download links in one simple place.',
+                    style: TextStyle(color: muted, height: 1.4),
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: _addLink,
+                    icon: const Icon(Icons.add_link_rounded),
+                    label: const Text('Add a link'),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'A clean home for files, videos, and torrents.',
-              style: TextStyle(color: muted, fontSize: 14),
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
             Row(
               children: [
                 Expanded(
                   child: _StatCard(
-                    label: 'Active',
-                    value: '$activeCount',
-                    icon: Icons.downloading_rounded,
+                    label: 'Queued links',
+                    value: '$queuedCount',
+                    icon: Icons.link_rounded,
                   ),
                 ),
                 const SizedBox(width: 12),
-                Expanded(
+                const Expanded(
                   child: _StatCard(
-                    label: 'Completed',
-                    value: '$completedCount',
+                    label: 'Downloaded',
+                    value: '0',
                     icon: Icons.check_circle_outline_rounded,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 28),
-            const Row(
+            const SizedBox(height: 26),
+            Row(
               children: [
-                Text('Downloads',
-                    style:
-                        TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
-                Spacer(),
-                Text('This session',
-                    style: TextStyle(color: muted, fontSize: 13)),
+                const Text('Your links',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                Text(
+                  queuedCount == 0 ? 'Nothing added' : '$queuedCount saved this session',
+                  style: const TextStyle(color: muted, fontSize: 12),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -218,59 +264,62 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             else
               ..._links.map((link) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: Card(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: panel,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.06)),
+                      ),
                       child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0x268B5CF6),
-                          child: Icon(Icons.link_rounded, color: violet),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        leading: Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: violet.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(Icons.insert_drive_file_outlined,
+                              color: violet),
                         ),
                         title: Text(link.fileName,
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              link.url.toString(),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Ready · download engine not connected',
-                              style: TextStyle(color: muted, fontSize: 12),
-                            ),
-                          ],
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 5),
+                          child: Text(
+                            link.url.toString(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: muted, fontSize: 12),
+                          ),
                         ),
+                        trailing: const Icon(Icons.more_horiz_rounded,
+                            color: muted),
                       ),
                     ),
                   )),
-            const SizedBox(height: 24),
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.construction_rounded, color: violet),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Starter build',
-                              style: TextStyle(fontWeight: FontWeight.w700)),
-                          SizedBox(height: 5),
-                          Text(
-                            'Links added here are kept in memory for this session only. Real downloading, persistence, video extraction, and BitTorrent are not connected yet.',
-                            style: TextStyle(
-                                color: muted, height: 1.4, fontSize: 13),
-                          ),
-                        ],
-                      ),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: panel,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline_rounded, color: violet, size: 21),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Preview build: links are kept for this session only. Actual downloading and persistent history are the next implementation steps.',
+                      style: TextStyle(color: muted, height: 1.45, fontSize: 12),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
