@@ -3,11 +3,29 @@
 //! Keep bridge-facing arguments and return values simple. The generated bridge
 //! is not wired into Flutter yet; these functions are the first API boundary.
 
-use crate::{download_to_path, DownloadUrl};
+use crate::{download_to_path, download_to_path_with_progress, DownloadUrl};
+use flutter_rust_bridge::{frb, StreamSink};
+use serde_json;
 
 /// Validates and normalizes a direct HTTP(S) download URL.
 pub fn validate_download_url(input: String) -> Result<String, String> {
     DownloadUrl::parse(&input).map(|url| url.as_str().to_owned())
+}
+
+/// Streams download progress events to Dart while writing the file.
+#[frb]
+pub fn download_file_with_progress(
+    input_url: String,
+    destination_path: String,
+    sink: StreamSink<String>,
+) -> Result<u64, String> {
+    download_to_path_with_progress(&input_url, destination_path, |received, total| {
+        let event = serde_json::json!({
+            "received": received,
+            "total": total,
+        });
+        let _ = sink.add(event.to_string());
+    })
 }
 
 /// Downloads a URL to the exact destination path supplied by the caller.
