@@ -21,6 +21,15 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Set up Rust for bridge generation
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Flutter Rust Bridge code generator
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: Generate Flutter-Rust bridge before analysis
+        run: flutter_rust_bridge_codegen generate
+
       - name: Install Flutter dependencies
         run: flutter pub get
 
