@@ -18,8 +18,7 @@ Future<String> validateDownloadUrl({required String input}) =>
 Future<BigInt> downloadFile({
   required String inputUrl,
   required String destinationPath,
-}) =>
-    RustLib.instance.api.crateApiDownloadFile(
-      inputUrl: inputUrl,
-      destinationPath: destinationPath,
-    );
+}) => RustLib.instance.api.crateApiDownloadFile(
+  inputUrl: inputUrl,
+  destinationPath: destinationPath,
+);
