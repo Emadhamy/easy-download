@@ -11,6 +11,15 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<String> validateDownloadUrl({required String input}) =>
     RustLib.instance.api.crateApiValidateDownloadUrl(input: input);
 
+/// Streams download progress events to Dart while writing the file.
+Stream<String> downloadFileWithProgress({
+  required String inputUrl,
+  required String destinationPath,
+}) => RustLib.instance.api.crateApiDownloadFileWithProgress(
+  inputUrl: inputUrl,
+  destinationPath: destinationPath,
+);
+
 /// Downloads a URL to the exact destination path supplied by the caller.
 ///
 /// This is a blocking Rust operation. The bridge integration must expose it
