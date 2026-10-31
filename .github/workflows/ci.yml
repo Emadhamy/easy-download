@@ -91,6 +91,9 @@ jobs:
       - name: Install Flutter Rust Bridge code generator
         run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
 
+      - name: Integrate Flutter-Rust bridge
+        run: flutter_rust_bridge_codegen integrate
+
       - name: Generate Flutter-Rust bridge
         run: flutter_rust_bridge_codegen generate
 
