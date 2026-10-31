@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'src/rust/api.dart' as rust_api;
+import 'src/rust/frb_generated.dart' show RustLib;
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await RustLib.init();
   runApp(const EasyDownloadApp());
 }
 
@@ -52,6 +56,21 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     final controller = TextEditingController();
     String? errorText;
 
+    Future<void> validateAndSubmit() async {
+      try {
+        final normalized = await rust_api.validateDownloadUrl(
+          input: controller.text.trim(),
+        );
+        final uri = Uri.parse(normalized);
+        if (dialogContext.mounted) Navigator.of(dialogContext).pop(uri);
+      } catch (_) {
+        if (dialogContext.mounted) {
+          setDialogState(() => errorText =
+              'Invalid URL. Enter a direct HTTP or HTTPS link.');
+        }
+      }
+    }
+
     final result = await showDialog<Uri>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -69,14 +88,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   setDialogState(() => errorText = null);
                 }
               },
-              onSubmitted: (_) {
-                final uri = _validateUrl(controller.text);
-                if (uri == null) {
-                  setDialogState(() => errorText =
-                      'Enter a valid link starting with http:// or https://');
-                } else {
-                  Navigator.of(dialogContext).pop(uri);
-                }
+              onSubmitted: (_) async {
+                await validateAndSubmit();
               },
               decoration: InputDecoration(
                 hintText: 'https://example.com/file.zip',
@@ -92,15 +105,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               child: const Text('Cancel'),
             ),
             FilledButton.icon(
-              onPressed: () {
-                final uri = _validateUrl(controller.text);
-                if (uri == null) {
-                  setDialogState(() => errorText =
-                      'Enter a valid link starting with http:// or https://');
-                  return;
-                }
-                Navigator.of(dialogContext).pop(uri);
-              },
+              onPressed: validateAndSubmit,
               icon: const Icon(Icons.link_rounded),
               label: const Text('Add link'),
             ),
@@ -128,16 +133,6 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
   }
 
-  Uri? _validateUrl(String input) {
-    final uri = Uri.tryParse(input.trim());
-    if (uri == null ||
-        !uri.hasAuthority ||
-        uri.host.isEmpty ||
-        !(uri.scheme == 'http' || uri.scheme == 'https')) {
-      return null;
-    }
-    return uri;
-  }
 
   @override
   Widget build(BuildContext context) {
