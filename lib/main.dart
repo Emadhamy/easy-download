@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -36,10 +37,11 @@ class EasyDownloadApp extends StatelessWidget {
 }
 
 class _LinkDraft {
-  const _LinkDraft({required this.url, required this.fileName});
-
+  _LinkDraft({required this.url, required this.fileName});
   final Uri url;
   final String fileName;
+  bool isDownloading = false;
+  String? savedPath;
 }
 
 class DownloadHomePage extends StatefulWidget {
@@ -51,6 +53,24 @@ class DownloadHomePage extends StatefulWidget {
 
 class _DownloadHomePageState extends State<DownloadHomePage> {
   final List<_LinkDraft> _links = [];
+
+  Future<void> _download(_LinkDraft link) async {
+    if (link.isDownloading || link.savedPath != null) return;
+    setState(() => link.isDownloading = true);
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final safeName = link.fileName.replaceAll('/', '_');
+      final destination = directory.path + '/' + safeName;
+      await rust_api.downloadFile(inputUrl: link.url.toString(), destinationPath: destination);
+      if (!mounted) return;
+      setState(() { link.savedPath = destination; link.isDownloading = false; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $safeName')));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => link.isDownloading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
+    }
+  }
 
   Future<void> _addLink() async {
     final controller = TextEditingController();
@@ -296,8 +316,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                             style: const TextStyle(color: muted, fontSize: 12),
                           ),
                         ),
-                        trailing: const Icon(Icons.more_horiz_rounded,
-                            color: muted),
+                        trailing: link.savedPath != null
+                            ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80))
+                            : link.isDownloading
+                                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                                : IconButton(tooltip: 'Download', onPressed: () => _download(link), icon: const Icon(Icons.download_rounded, color: violet)),
                       ),
                     ),
                   )),
@@ -315,7 +338,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Preview build: links are kept for this session only. Actual downloading and persistent history are the next implementation steps.',
+                      'Downloads save inside app storage. History is session-only; progress controls are coming next.',
                       style: TextStyle(color: muted, height: 1.45, fontSize: 12),
                     ),
                   ),
