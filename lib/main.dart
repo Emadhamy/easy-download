@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -42,6 +44,19 @@ class _LinkDraft {
   final String fileName;
   bool isDownloading = false;
   String? savedPath;
+
+  Map<String, dynamic> toJson() => {
+        'url': url.toString(),
+        'fileName': fileName,
+        'savedPath': savedPath,
+      };
+
+  static _LinkDraft? fromJson(Map<String, dynamic> json) {
+    final parsed = Uri.tryParse(json['url'] as String? ?? '');
+    if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) return null;
+    return _LinkDraft(url: parsed, fileName: json['fileName'] as String? ?? parsed.host)
+      ..savedPath = json['savedPath'] as String?;
+  }
 }
 
 class DownloadHomePage extends StatefulWidget {
@@ -53,6 +68,35 @@ class DownloadHomePage extends StatefulWidget {
 
 class _DownloadHomePageState extends State<DownloadHomePage> {
   final List<_LinkDraft> _links = [];
+  static const _historyKey = 'easy_download_history_v1';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_historyKey);
+    if (raw == null || !mounted) return;
+    try {
+      final entries = jsonDecode(raw) as List<dynamic>;
+      final restored = entries
+          .whereType<Map<String, dynamic>>()
+          .map(_LinkDraft.fromJson)
+          .whereType<_LinkDraft>()
+          .toList();
+      setState(() { _links..clear()..addAll(restored); });
+    } catch (_) {
+      // Keep the app usable if local history is invalid.
+    }
+  }
+
+  Future<void> _saveHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_historyKey, jsonEncode(_links.map((item) => item.toJson()).toList()));
+  }
 
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
@@ -64,6 +108,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       await rust_api.downloadFile(inputUrl: link.url.toString(), destinationPath: destination);
       if (!mounted) return;
       setState(() { link.savedPath = destination; link.isDownloading = false; });
+      await _saveHistory();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $safeName')));
     } catch (_) {
       if (!mounted) return;
@@ -147,10 +192,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     setState(() {
       _links.insert(0, _LinkDraft(url: result, fileName: fileName));
     });
+    await _saveHistory();
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Link added to this session. Downloading is not connected yet.'),
+        content: Text('Link added to your download list.'),
       ),
     );
   }
