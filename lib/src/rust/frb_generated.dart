@@ -3,15 +3,11 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'api.dart';
-
 import 'dart:async';
 import 'dart:convert';
-
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -38,8 +34,12 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   /// Initialize flutter_rust_bridge in mock mode.
   /// No libraries for FFI are loaded.
-  static void initMock({required RustLibApi api}) {
-    instance.initMockImpl(api: api);
+  static void initMock({
+    required RustLibApi api,
+  }) {
+    instance.initMockImpl(
+      api: api,
+    );
   }
 
   /// Dispose flutter_rust_bridge
@@ -67,25 +67,18 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -349935261;
+  int get rustContentHash => -291292710;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-        stem: 'easy_download_core',
-        ioDirectory: 'rust/target/release/',
-        webPrefix: 'pkg/',
-        wasmBindgenName: 'wasm_bindgen',
-      );
+    stem: 'easy_download_core',
+    ioDirectory: 'rust/target/release/',
+    webPrefix: 'pkg/',
+    wasmBindgenName: 'wasm_bindgen',
+  );
 }
 
-abstract class RustLibApi extends BaseApi {
-  Future<BigInt> crateApiDownloadFile({
-    required String inputUrl,
-    required String destinationPath,
-  });
-
-  Future<String> crateApiValidateDownloadUrl({required String input});
-}
+abstract class RustLibApi extends BaseApi {}
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RustLibApiImpl({
@@ -94,121 +87,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required super.generalizedFrbRustBinding,
     required super.portManager,
   });
-
-  @override
-  Future<BigInt> crateApiDownloadFile({
-    required String inputUrl,
-    required String destinationPath,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(inputUrl, serializer);
-          sse_encode_String(destinationPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 1,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_u_64,
-          decodeErrorData: sse_decode_String,
-        ),
-        constMeta: kCrateApiDownloadFileConstMeta,
-        argValues: [inputUrl, destinationPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiDownloadFileConstMeta => const TaskConstMeta(
-    debugName: "download_file",
-    argNames: ["inputUrl", "destinationPath"],
-  );
-
-  @override
-  Future<String> crateApiValidateDownloadUrl({required String input}) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(input, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 2,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
-          decodeErrorData: sse_decode_String,
-        ),
-        constMeta: kCrateApiValidateDownloadUrlConstMeta,
-        argValues: [input],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiValidateDownloadUrlConstMeta =>
-      const TaskConstMeta(
-        debugName: "validate_download_url",
-        argNames: ["input"],
-      );
-
-  @protected
-  String dco_decode_String(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw as String;
-  }
-
-  @protected
-  Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw as Uint8List;
-  }
-
-  @protected
-  BigInt dco_decode_u_64(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dcoDecodeU64(raw);
-  }
-
-  @protected
-  int dco_decode_u_8(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw as int;
-  }
-
-  @protected
-  String sse_decode_String(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_list_prim_u_8_strict(deserializer);
-    return utf8.decoder.convert(inner);
-  }
-
-  @protected
-  Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var len_ = sse_decode_i_32(deserializer);
-    return deserializer.buffer.getUint8List(len_);
-  }
-
-  @protected
-  BigInt sse_decode_u_64(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getBigUint64();
-  }
-
-  @protected
-  int sse_decode_u_8(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getUint8();
-  }
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer) {
@@ -220,34 +98,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
-  }
-
-  @protected
-  void sse_encode_String(String self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
-  }
-
-  @protected
-  void sse_encode_list_prim_u_8_strict(
-    Uint8List self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    serializer.buffer.putUint8List(self);
-  }
-
-  @protected
-  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putBigUint64(self);
-  }
-
-  @protected
-  void sse_encode_u_8(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putUint8(self);
   }
 
   @protected
