@@ -5,7 +5,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   flutter-check:
@@ -93,6 +93,17 @@ jobs:
 
       - name: Generate Flutter-Rust bridge
         run: flutter_rust_bridge_codegen generate
+
+      - name: Commit generated bridge files
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/src/rust/
+          if ! git diff --cached --quiet; then
+            git commit -m "Update generated Flutter Rust bridge"
+            git push
+          fi
 
       - name: Upload generated bridge files
         uses: actions/upload-artifact@v4
