@@ -56,61 +56,63 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     final controller = TextEditingController();
     String? errorText;
 
-    Future<void> validateAndSubmit() async {
-      try {
-        final normalized = await rust_api.validateDownloadUrl(
-          input: controller.text.trim(),
-        );
-        final uri = Uri.parse(normalized);
-        if (dialogContext.mounted) Navigator.of(dialogContext).pop(uri);
-      } catch (_) {
-        if (dialogContext.mounted) {
-          setDialogState(() => errorText =
-              'Invalid URL. Enter a direct HTTP or HTTPS link.');
-        }
-      }
-    }
-
     final result = await showDialog<Uri>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Add a direct link'),
-          content: SizedBox(
-            width: 440,
-            child: TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.done,
-              onChanged: (_) {
-                if (errorText != null) {
-                  setDialogState(() => errorText = null);
-                }
-              },
-              onSubmitted: (_) async {
-                await validateAndSubmit();
-              },
-              decoration: InputDecoration(
-                hintText: 'https://example.com/file.zip',
-                labelText: 'Download URL',
-                border: const OutlineInputBorder(),
-                errorText: errorText,
+        builder: (context, setDialogState) {
+          Future<void> validateAndSubmit() async {
+            try {
+              final normalized = await rust_api.validateDownloadUrl(
+                input: controller.text.trim(),
+              );
+              final uri = Uri.parse(normalized);
+              if (dialogContext.mounted) {
+                Navigator.of(dialogContext).pop(uri);
+              }
+            } catch (_) {
+              if (dialogContext.mounted) {
+                setDialogState(() => errorText =
+                    'Invalid URL. Enter a direct HTTP or HTTPS link.');
+              }
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Add a direct link'),
+            content: SizedBox(
+              width: 440,
+              child: TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.done,
+                onChanged: (_) {
+                  if (errorText != null) {
+                    setDialogState(() => errorText = null);
+                  }
+                },
+                onSubmitted: (_) async => validateAndSubmit(),
+                decoration: InputDecoration(
+                  hintText: 'https://example.com/file.zip',
+                  labelText: 'Download URL',
+                  border: const OutlineInputBorder(),
+                  errorText: errorText,
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton.icon(
-              onPressed: validateAndSubmit,
-              icon: const Icon(Icons.link_rounded),
-              label: const Text('Add link'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: validateAndSubmit,
+                icon: const Icon(Icons.link_rounded),
+                label: const Text('Add link'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
