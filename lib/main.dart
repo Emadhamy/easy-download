@@ -274,6 +274,22 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     return unit == 0 ? '${value.toStringAsFixed(0)} ${units[unit]}' : '${value.toStringAsFixed(1)} ${units[unit]}';
   }
 
+  String _formatRemaining(int seconds) {
+    if (seconds < 60) return '${seconds}s left';
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds == 0
+          ? '${minutes}m left'
+          : '${minutes}m ${remainingSeconds}s left';
+    }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    return remainingMinutes == 0
+        ? '${hours}h left'
+        : '${hours}h ${remainingMinutes}m left';
+  }
+
   Future<void> _addLink() async {
     final controller = TextEditingController();
     String? errorText;
@@ -586,7 +602,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}',
+                                      '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}${link.totalBytes != null && link.totalBytes! > link.receivedBytes && link.speedBytesPerSecond > 0 ? '  •  ${_formatRemaining(((link.totalBytes! - link.receivedBytes) / link.speedBytesPerSecond).ceil())}' : ''}',
                                       style: const TextStyle(color: muted, fontSize: 11),
                                     ),
                                   ],
