@@ -498,7 +498,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                 ),
                         ),
                         trailing: link.savedPath != null
-                            ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80))
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80)),
+                                  IconButton(
+                                    tooltip: 'Remove from list',
+                                    onPressed: () => _removeLink(link),
+                                    icon: const Icon(Icons.delete_outline_rounded),
+                                  ),
+                                ],
+                              )
                             : link.isDownloading
                                 ? Row(
                                     mainAxisSize: MainAxisSize.min,
