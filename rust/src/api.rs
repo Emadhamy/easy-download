@@ -4,7 +4,8 @@
 //! is not wired into Flutter yet; these functions are the first API boundary.
 
 use crate::{download_to_path, download_to_path_with_progress, DownloadUrl};
-use flutter_rust_bridge::{frb, StreamSink};
+use flutter_rust_bridge::frb;
+use crate::frb_generated::StreamSink;
 use serde_json;
 
 /// Validates and normalizes a direct HTTP(S) download URL.
