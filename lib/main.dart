@@ -104,6 +104,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await prefs.setString(_historyKey, jsonEncode(_links.map((item) => item.toJson()).toList()));
   }
 
+  Future<void> _removeLink(_LinkDraft link) async {
+    if (link.isDownloading) return;
+    setState(() => _links.remove(link));
+    await _saveHistory();
+  }
+
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
     final taskId = 'download-${DateTime.now().microsecondsSinceEpoch}';
@@ -516,7 +522,21 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                       ),
                                     ],
                                   )
-                                : IconButton(tooltip: 'Download', onPressed: () => _download(link), icon: const Icon(Icons.download_rounded, color: violet)),
+                                : Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'Download',
+                                        onPressed: () => _download(link),
+                                        icon: const Icon(Icons.download_rounded, color: violet),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Remove from list',
+                                        onPressed: () => _removeLink(link),
+                                        icon: const Icon(Icons.delete_outline_rounded),
+                                      ),
+                                    ],
+                                  ),
                       ),
                     ),
                   )),
