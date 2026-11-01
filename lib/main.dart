@@ -116,6 +116,27 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _clearCompleted() async {
     final completed = _links.where((link) => link.savedPath != null).toList();
     if (completed.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear completed downloads?'),
+        content: Text(
+          'Remove ${completed.length} completed item(s) from the list? '
+          'The downloaded files will remain on your device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     setState(() => _links.removeWhere((link) => link.savedPath != null));
     await _saveHistory();
     if (!mounted) return;
