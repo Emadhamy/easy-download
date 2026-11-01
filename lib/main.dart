@@ -107,6 +107,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await prefs.setString(_historyKey, jsonEncode(_links.map((item) => item.toJson()).toList()));
   }
 
+  Future<void> _copySavedPath(_LinkDraft link) async {
+    final path = link.savedPath;
+    if (path == null) return;
+    await Clipboard.setData(ClipboardData(text: path));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saved file path copied.')),
+    );
+  }
+
   Future<void> _removeLink(_LinkDraft link) async {
     if (link.isDownloading) return;
     setState(() => _links.remove(link));
@@ -619,6 +629,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80)),
+                                  IconButton(
+                                    tooltip: 'Copy saved path',
+                                    onPressed: () => _copySavedPath(link),
+                                    icon: const Icon(Icons.copy_rounded),
+                                  ),
                                   IconButton(
                                     tooltip: 'Remove from list',
                                     onPressed: () => _removeLink(link),
