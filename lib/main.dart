@@ -43,6 +43,9 @@ class _LinkDraft {
   final Uri url;
   final String fileName;
   bool isDownloading = false;
+  int receivedBytes = 0;
+  int? totalBytes;
+  double speedBytesPerSecond = 0;
   String? savedPath;
 
   Map<String, dynamic> toJson() => {
@@ -100,12 +103,37 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
-    setState(() => link.isDownloading = true);
+    setState(() {
+      link.isDownloading = true;
+      link.receivedBytes = 0;
+      link.totalBytes = null;
+      link.speedBytesPerSecond = 0;
+    });
+    var previousBytes = 0;
+    var previousTime = DateTime.now();
     try {
       final directory = await getApplicationDocumentsDirectory();
       final safeName = link.fileName.replaceAll('/', '_');
       final destination = directory.path + '/' + safeName;
-      await rust_api.downloadFile(inputUrl: link.url.toString(), destinationPath: destination);
+      await for (final event in rust_api.downloadFileWithProgress(
+        inputUrl: link.url.toString(),
+        destinationPath: destination,
+      )) {
+        final progress = jsonDecode(event) as Map<String, dynamic>;
+        final received = (progress['received'] as num).toInt();
+        final total = (progress['total'] as num?)?.toInt();
+        final now = DateTime.now();
+        final elapsed = now.difference(previousTime).inMilliseconds / 1000;
+        final speed = elapsed > 0 ? (received - previousBytes) / elapsed : 0.0;
+        previousBytes = received;
+        previousTime = now;
+        if (!mounted) return;
+        setState(() {
+          link.receivedBytes = received;
+          link.totalBytes = total;
+          link.speedBytesPerSecond = speed;
+        });
+      }
       if (!mounted) return;
       setState(() { link.savedPath = destination; link.isDownloading = false; });
       await _saveHistory();
@@ -115,6 +143,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       setState(() => link.isDownloading = false);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
     }
+  }
+
+  String _formatBytes(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = bytes.toDouble();
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return unit == 0 ? '${value.toStringAsFixed(0)} ${units[unit]}' : '${value.toStringAsFixed(1)} ${units[unit]}';
   }
 
   Future<void> _addLink() async {
@@ -355,12 +394,36 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                             style: const TextStyle(fontWeight: FontWeight.w700)),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 5),
-                          child: Text(
-                            link.url.toString(),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: muted, fontSize: 12),
-                          ),
+                          child: link.isDownloading
+                              ? Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '${_formatBytes(link.receivedBytes)} / ${link.totalBytes == null || link.totalBytes == 0 ? 'Unknown size' : _formatBytes(link.totalBytes!)}',
+                                      style: const TextStyle(color: muted, fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    LinearProgressIndicator(
+                                      value: link.totalBytes != null && link.totalBytes! > 0
+                                          ? (link.receivedBytes / link.totalBytes!).clamp(0.0, 1.0)
+                                          : null,
+                                      minHeight: 4,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}',
+                                      style: const TextStyle(color: muted, fontSize: 11),
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  link.url.toString(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: muted, fontSize: 12),
+                                ),
                         ),
                         trailing: link.savedPath != null
                             ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80))
