@@ -7,6 +7,7 @@ pub mod api;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::{Arc, Condvar, Mutex};
 
 use reqwest::blocking::Client;
 use url::Url;
@@ -37,14 +38,69 @@ impl DownloadUrl {
     }
 }
 
-/// Downloads a direct HTTP(S) URL to the destination file.
+/// Thread-safe controls for a running download.
 ///
-/// The callback receives (bytes_received, total_bytes). The total is None if
-/// the server does not provide a Content-Length header. This function streams
-/// data in chunks rather than loading the entire response into memory.
-pub fn download_to_path_with_progress<F>(
+/// Pause takes effect between network reads. Cancel is checked before writing
+/// the next received chunk; an in-flight blocking read may finish first.
+#[derive(Clone, Default)]
+pub struct DownloadControl {
+    state: Arc<(Mutex<DownloadState>, Condvar)>,
+}
+
+#[derive(Default)]
+struct DownloadState {
+    paused: bool,
+    cancelled: bool,
+}
+
+impl DownloadControl {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn pause(&self) {
+        let (lock, _) = &*self.state;
+        if let Ok(mut state) = lock.lock() {
+            state.paused = true;
+        }
+    }
+
+    pub fn resume(&self) {
+        let (lock, wake) = &*self.state;
+        if let Ok(mut state) = lock.lock() {
+            state.paused = false;
+            wake.notify_all();
+        }
+    }
+
+    pub fn cancel(&self) {
+        let (lock, wake) = &*self.state;
+        if let Ok(mut state) = lock.lock() {
+            state.cancelled = true;
+            state.paused = false;
+            wake.notify_all();
+        }
+    }
+
+    fn wait_until_running(&self) -> Result<(), String> {
+        let (lock, wake) = &*self.state;
+        let mut state = lock.lock().map_err(|_| "Download control lock poisoned".to_string())?;
+        while state.paused && !state.cancelled {
+            state = wake.wait(state).map_err(|_| "Download control lock poisoned".to_string())?;
+        }
+        if state.cancelled {
+            return Err("Download cancelled".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Streams a direct HTTP(S) download and supports pause/resume/cancel controls.
+/// Progress callback receives (bytes_received, total_bytes).
+pub fn download_to_path_with_control<F>(
     input_url: &str,
     destination: impl AsRef<Path>,
+    control: DownloadControl,
     mut on_progress: F,
 ) -> Result<u64, String>
 where
@@ -54,7 +110,6 @@ where
     let client = Client::builder()
         .build()
         .map_err(|error| format!("Could not create HTTP client: {error}"))?;
-
     let mut response = client
         .get(url.as_str())
         .send()
@@ -64,31 +119,37 @@ where
     let total_bytes = response.content_length();
     let mut output = File::create(destination.as_ref())
         .map_err(|error| format!("Could not create destination file: {error}"))?;
-
     let mut received_bytes = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
 
     loop {
-        let bytes_read = response
-            .read(&mut buffer)
+        control.wait_until_running()?;
+        let bytes_read = response.read(&mut buffer)
             .map_err(|error| format!("Could not read download response: {error}"))?;
         if bytes_read == 0 {
             break;
         }
-
-        output
-            .write_all(&buffer[..bytes_read])
+        control.wait_until_running()?;
+        output.write_all(&buffer[..bytes_read])
             .map_err(|error| format!("Could not write downloaded data: {error}"))?;
-
         received_bytes += bytes_read as u64;
         on_progress(received_bytes, total_bytes);
     }
 
-    output
-        .flush()
-        .map_err(|error| format!("Could not flush destination file: {error}"))?;
-
+    output.flush().map_err(|error| format!("Could not flush destination file: {error}"))?;
     Ok(received_bytes)
+}
+
+/// Downloads a direct HTTP(S) URL to the destination file with progress updates.
+pub fn download_to_path_with_progress<F>(
+    input_url: &str,
+    destination: impl AsRef<Path>,
+    on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(u64, Option<u64>),
+{
+    download_to_path_with_control(input_url, destination, DownloadControl::new(), on_progress)
 }
 
 /// Downloads a direct HTTP(S) URL to a file and returns the number of bytes
