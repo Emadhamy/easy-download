@@ -7,6 +7,28 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `control_for`, `controls`
+
+/// Starts a controlled download. Keep task_id and use the command functions below.
+Stream<String> downloadFileControlled({
+  required String taskId,
+  required String inputUrl,
+  required String destinationPath,
+}) => RustLib.instance.api.crateApiDownloadFileControlled(
+  taskId: taskId,
+  inputUrl: inputUrl,
+  destinationPath: destinationPath,
+);
+
+Future<void> pauseDownload({required String taskId}) =>
+    RustLib.instance.api.crateApiPauseDownload(taskId: taskId);
+
+Future<void> resumeDownload({required String taskId}) =>
+    RustLib.instance.api.crateApiResumeDownload(taskId: taskId);
+
+Future<void> cancelDownload({required String taskId}) =>
+    RustLib.instance.api.crateApiCancelDownload(taskId: taskId);
+
 /// Validates and normalizes a direct HTTP(S) download URL.
 Future<String> validateDownloadUrl({required String input}) =>
     RustLib.instance.api.crateApiValidateDownloadUrl(input: input);
