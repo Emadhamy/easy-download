@@ -44,6 +44,7 @@ class _LinkDraft {
   final String fileName;
   bool isDownloading = false;
   bool isPaused = false;
+  bool isCancelled = false;
   String? taskId;
   int receivedBytes = 0;
   int? totalBytes;
@@ -110,6 +111,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     setState(() {
       link.isDownloading = true;
       link.isPaused = false;
+      link.isCancelled = false;
       link.receivedBytes = 0;
       link.totalBytes = null;
       link.speedBytesPerSecond = 0;
@@ -147,7 +149,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     } catch (_) {
       if (!mounted) return;
       setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
+      if (!link.isCancelled) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
+      }
     }
   }
 
@@ -187,7 +191,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     if (taskId == null || !link.isDownloading) return;
     try {
       await rust_api.cancelDownload(taskId: taskId);
-      if (mounted) setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
+      link.isCancelled = true;
+      if (mounted) {
+        setState(() {
+          _links.remove(link);
+          link.isDownloading = false;
+          link.isPaused = false;
+          link.taskId = null;
+        });
+        await _saveHistory();
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -298,7 +311,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     const violet = Color(0xFF8B5CF6);
     const muted = Color(0xFF9A9AAF);
     const panel = Color(0xFF151525);
-    final queuedCount = _links.length;
+    final queuedCount = _links.where((link) => link.savedPath == null).length;
+    final downloadedCount = _links.where((link) => link.savedPath != null).length;
 
     return Scaffold(
       appBar: AppBar(
@@ -394,10 +408,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: _StatCard(
                     label: 'Downloaded',
-                    value: '0',
+                    value: '$downloadedCount',
                     icon: Icons.check_circle_outline_rounded,
                   ),
                 ),
@@ -410,7 +424,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
                 Text(
-                  queuedCount == 0 ? 'Nothing added' : '$queuedCount saved this session',
+                  queuedCount == 0 ? 'Nothing pending' : '$queuedCount pending',
                   style: const TextStyle(color: muted, fontSize: 12),
                 ),
               ],
