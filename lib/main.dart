@@ -113,6 +113,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await _saveHistory();
   }
 
+  Future<void> _clearCompleted() async {
+    final completed = _links.where((link) => link.savedPath != null).toList();
+    if (completed.isEmpty) return;
+    setState(() => _links.removeWhere((link) => link.savedPath != null));
+    await _saveHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Removed ${completed.length} completed item(s) from history.')),
+    );
+  }
+
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
     final taskId = 'download-${DateTime.now().microsecondsSinceEpoch}';
@@ -455,10 +466,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const Text('Your links',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
-                Text(
-                  queuedCount == 0 ? 'Nothing pending' : '$queuedCount pending',
-                  style: const TextStyle(color: muted, fontSize: 12),
-                ),
+                if (downloadedCount > 0)
+                  TextButton.icon(
+                    onPressed: _clearCompleted,
+                    icon: const Icon(Icons.cleaning_services_rounded, size: 16),
+                    label: const Text('Clear completed'),
+                  )
+                else
+                  Text(
+                    queuedCount == 0 ? 'Nothing pending' : '$queuedCount pending',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
               ],
             ),
             const SizedBox(height: 12),
