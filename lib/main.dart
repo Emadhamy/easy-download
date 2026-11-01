@@ -43,6 +43,8 @@ class _LinkDraft {
   final Uri url;
   final String fileName;
   bool isDownloading = false;
+  bool isPaused = false;
+  String? taskId;
   int receivedBytes = 0;
   int? totalBytes;
   double speedBytesPerSecond = 0;
@@ -103,8 +105,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
+    final taskId = 'download-${DateTime.now().microsecondsSinceEpoch}';
+    link.taskId = taskId;
     setState(() {
       link.isDownloading = true;
+      link.isPaused = false;
       link.receivedBytes = 0;
       link.totalBytes = null;
       link.speedBytesPerSecond = 0;
@@ -115,7 +120,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       final directory = await getApplicationDocumentsDirectory();
       final safeName = link.fileName.replaceAll('/', '_');
       final destination = directory.path + '/' + safeName;
-      await for (final event in rust_api.downloadFileWithProgress(
+      await for (final event in rust_api.downloadFileControlled(
+        taskId: taskId,
         inputUrl: link.url.toString(),
         destinationPath: destination,
       )) {
@@ -135,13 +141,59 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         });
       }
       if (!mounted) return;
-      setState(() { link.savedPath = destination; link.isDownloading = false; });
+      setState(() { link.savedPath = destination; link.isDownloading = false; link.isPaused = false; link.taskId = null; });
       await _saveHistory();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $safeName')));
     } catch (_) {
       if (!mounted) return;
-      setState(() => link.isDownloading = false);
+      setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
+    }
+  }
+
+
+  Future<void> _pauseDownload(_LinkDraft link) async {
+    final taskId = link.taskId;
+    if (taskId == null || !link.isDownloading || link.isPaused) return;
+    try {
+      await rust_api.pauseDownload(taskId: taskId);
+      if (mounted) setState(() => link.isPaused = true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not pause this download.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _resumeDownload(_LinkDraft link) async {
+    final taskId = link.taskId;
+    if (taskId == null || !link.isDownloading || !link.isPaused) return;
+    try {
+      await rust_api.resumeDownload(taskId: taskId);
+      if (mounted) setState(() => link.isPaused = false);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not resume this download.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _cancelDownload(_LinkDraft link) async {
+    final taskId = link.taskId;
+    if (taskId == null || !link.isDownloading) return;
+    try {
+      await rust_api.cancelDownload(taskId: taskId);
+      if (mounted) setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not cancel this download.')),
+        );
+      }
     }
   }
 
@@ -428,7 +480,28 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                         trailing: link.savedPath != null
                             ? const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80))
                             : link.isDownloading
-                                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: link.isPaused ? 'Resume' : 'Pause',
+                                        onPressed: () => link.isPaused
+                                            ? _resumeDownload(link)
+                                            : _pauseDownload(link),
+                                        icon: Icon(
+                                          link.isPaused
+                                              ? Icons.play_arrow_rounded
+                                              : Icons.pause_rounded,
+                                          color: violet,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Cancel download',
+                                        onPressed: () => _cancelDownload(link),
+                                        icon: const Icon(Icons.close_rounded),
+                                      ),
+                                    ],
+                                  )
                                 : IconButton(tooltip: 'Download', onPressed: () => _download(link), icon: const Icon(Icons.download_rounded, color: violet)),
                       ),
                     ),
@@ -447,7 +520,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Downloads save inside app storage. History is session-only; progress controls are coming next.',
+                      'Downloads save inside app storage. Use pause, resume, or cancel while a download is active.',
                       style: TextStyle(color: muted, height: 1.45, fontSize: 12),
                     ),
                   ),
