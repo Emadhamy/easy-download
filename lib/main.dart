@@ -74,6 +74,8 @@ class DownloadHomePage extends StatefulWidget {
 
 class _DownloadHomePageState extends State<DownloadHomePage> {
   final List<_LinkDraft> _links = [];
+  String _filter = 'All';
+  String _searchQuery = '';
   static const _historyKey = 'easy_download_history_v1';
 
   @override
@@ -319,6 +321,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     const panel = Color(0xFF151525);
     final queuedCount = _links.where((link) => link.savedPath == null).length;
     final downloadedCount = _links.where((link) => link.savedPath != null).length;
+    final visibleLinks = _links.where((link) {
+      final matchesFilter = _filter == 'All' ||
+          (_filter == 'Active' && link.isDownloading) ||
+          (_filter == 'Queued' && !link.isDownloading && link.savedPath == null) ||
+          (_filter == 'Completed' && link.savedPath != null);
+      final query = _searchQuery.trim().toLowerCase();
+      final matchesSearch = query.isEmpty ||
+          link.fileName.toLowerCase().contains(query) ||
+          link.url.toString().toLowerCase().contains(query);
+      return matchesFilter && matchesSearch;
+    }).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -436,10 +449,46 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               ],
             ),
             const SizedBox(height: 12),
+            TextField(
+              onChanged: (value) => setState(() => _searchQuery = value),
+              decoration: InputDecoration(
+                hintText: 'Search downloads',
+                prefixIcon: const Icon(Icons.search_rounded),
+                filled: true,
+                fillColor: panel,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['All', 'Active', 'Queued', 'Completed'].map((filter) {
+                  final selected = _filter == filter;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(filter),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _filter = filter),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
             if (_links.isEmpty)
               const _EmptyState()
+            else if (visibleLinks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(child: Text('No downloads match this view.')),
+              )
             else
-              ..._links.map((link) => Padding(
+              ...visibleLinks.map((link) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: Container(
                       decoration: BoxDecoration(
