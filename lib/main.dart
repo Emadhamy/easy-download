@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'dart:io';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -129,7 +130,19 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     try {
       final directory = await getApplicationDocumentsDirectory();
       final safeName = link.fileName.replaceAll('/', '_');
-      final destination = directory.path + '/' + safeName;
+      // Avoid overwriting an existing file with the same name.
+      var destination = directory.path + '/' + safeName;
+      var candidateName = safeName;
+      var suffix = 1;
+      while (await File(destination).exists()) {
+        final dot = safeName.lastIndexOf('.');
+        final hasExtension = dot > 0;
+        final baseName = hasExtension ? safeName.substring(0, dot) : safeName;
+        final extension = hasExtension ? safeName.substring(dot) : '';
+        candidateName = '$baseName ($suffix)$extension';
+        destination = directory.path + '/' + candidateName;
+        suffix++;
+      }
       await for (final event in rust_api.downloadFileControlled(
         taskId: taskId,
         inputUrl: link.url.toString(),
@@ -153,7 +166,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       if (!mounted) return;
       setState(() { link.savedPath = destination; link.isDownloading = false; link.isPaused = false; link.taskId = null; });
       await _saveHistory();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $safeName')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $candidateName')));
     } catch (_) {
       if (!mounted) return;
       setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
