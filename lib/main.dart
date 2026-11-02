@@ -40,6 +40,16 @@ class EasyDownloadApp extends StatelessWidget {
   }
 }
 
+String _fileType(String name) {
+  final extension = name.split('.').last.toLowerCase();
+  if (['mp4', 'mkv', 'mov', 'webm', 'avi'].contains(extension)) return 'Video';
+  if (['mp3', 'wav', 'flac', 'm4a', 'ogg'].contains(extension)) return 'Audio';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].contains(extension)) return 'Images';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].contains(extension)) return 'Archives';
+  if (['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx'].contains(extension)) return 'Documents';
+  return 'Other';
+}
+
 IconData _downloadIconForName(String name) {
   final extension = name.split('.').last.toLowerCase();
   if (['mp4', 'mkv', 'mov', 'webm', 'avi'].contains(extension)) return Icons.movie_outlined;
@@ -428,7 +438,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       final matchesSearch = query.isEmpty ||
           link.fileName.toLowerCase().contains(query) ||
           link.url.toString().toLowerCase().contains(query);
-      return matchesFilter && matchesSearch;
+      final matchesType = _typeFilter == 'All' ||
+          (_typeFilter == 'Video' && _fileType(link.fileName) == 'Video') ||
+          (_typeFilter == 'Audio' && _fileType(link.fileName) == 'Audio') ||
+          (_typeFilter == 'Images' && _fileType(link.fileName) == 'Images') ||
+          (_typeFilter == 'Archives' && _fileType(link.fileName) == 'Archives') ||
+          (_typeFilter == 'Documents' && _fileType(link.fileName) == 'Documents') ||
+          (_typeFilter == 'Other' && _fileType(link.fileName) == 'Other');
+      return matchesFilter && matchesSearch && matchesType;
     }).toList();
 
     return Scaffold(
@@ -565,6 +582,23 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
                 ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['All', 'Video', 'Audio', 'Images', 'Archives', 'Documents', 'Other'].map((type) {
+                  final selected = _typeFilter == type;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(type),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _typeFilter = type),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
             const SizedBox(height: 10),
