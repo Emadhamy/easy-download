@@ -684,6 +684,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                       '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}${link.totalBytes != null && link.totalBytes! > link.receivedBytes && link.speedBytesPerSecond > 0 ? '  •  ${_formatRemaining(((link.totalBytes! - link.receivedBytes) / link.speedBytesPerSecond).ceil())}' : ''}',
                                       style: const TextStyle(color: muted, fontSize: 11),
                                     ),
+                                    if (link.isPaused)
+                                      const Padding(
+                                        padding: EdgeInsets.only(top: 4),
+                                        child: Text('Paused', style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600)),
+                                      ),
                                   ],
                                 )
                               : Text(
