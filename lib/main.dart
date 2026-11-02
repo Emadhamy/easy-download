@@ -691,12 +691,30 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                       ),
                                   ],
                                 )
-                              : Text(
-                                  link.savedPath ?? link.url.toString(),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: muted, fontSize: 12),
-                                ),
+                              : link.savedPath != null
+                                  ? Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          _formatBytes(link.receivedBytes),
+                                          style: const TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w600),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          link.savedPath!,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(color: muted, fontSize: 12),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      link.url.toString(),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(color: muted, fontSize: 12),
+                                    ),
                         ),
                         trailing: link.savedPath != null
                             ? Row(
