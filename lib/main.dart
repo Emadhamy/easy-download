@@ -453,7 +453,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       final query = _searchQuery.trim().toLowerCase();
       final matchesSearch = query.isEmpty ||
           link.fileName.toLowerCase().contains(query) ||
-          link.url.toString().toLowerCase().contains(query);
+          link.url.toString().toLowerCase().contains(query) ||
+          (link.savedPath?.toLowerCase().contains(query) ?? false);
       final matchesType = _typeFilter == 'All' ||
           (_typeFilter == 'Video' && _fileType(link.fileName) == 'Video') ||
           (_typeFilter == 'Audio' && _fileType(link.fileName) == 'Audio') ||
