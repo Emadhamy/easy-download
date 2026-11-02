@@ -130,6 +130,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await prefs.setString(_historyKey, jsonEncode(_links.map((item) => item.toJson()).toList()));
   }
 
+  Future<void> _copyDownloadUrl(_LinkDraft link) async {
+    await Clipboard.setData(ClipboardData(text: link.url.toString()));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Download URL copied.')),
+    );
+  }
+
   Future<void> _copySavedPath(_LinkDraft link) async {
     final path = link.savedPath;
     if (path == null) return;
@@ -759,6 +767,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                 : Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
+                                      IconButton(
+                                        tooltip: 'Copy download URL',
+                                        onPressed: () => _copyDownloadUrl(link),
+                                        icon: const Icon(Icons.link_rounded),
+                                      ),
                                       IconButton(
                                         tooltip: link.isFailed ? 'Retry download' : 'Download',
                                         onPressed: () => link.isFailed ? _retryDownload(link) : _download(link),
