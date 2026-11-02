@@ -177,7 +177,622 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           ? 'download-${DateTime.now().millisecondsSinceEpoch}'
           : rawName;
       // Prevent control characters and Windows-reserved filename symbols.
-      final portableName = safeName.replaceAll(RegExp(r'[<>:"|?*\\x00-\\x1F]'), '_');
+      final portableName = safeName
+          .replaceAll(RegExp(r'[<>:"|?*\\x00-\\x1F]'), '_')
+          .replaceAll(RegExp(r'[. ]+
+      // Avoid overwriting an existing file with the same name.
+      var destination = directory.path + '/' + finalName;
+      var candidateName = finalName;
+      var suffix = 1;
+      while (await File(destination).exists()) {
+        final dot = finalName.lastIndexOf('.');
+        final hasExtension = dot > 0;
+        final baseName = hasExtension ? finalName.substring(0, dot) : finalName;
+        final extension = hasExtension ? finalName.substring(dot) : '';
+        candidateName = '$baseName ($suffix)$extension';
+        destination = directory.path + '/' + candidateName;
+        suffix++;
+      }
+      await for (final event in rust_api.downloadFileControlled(
+        taskId: taskId,
+        inputUrl: link.url.toString(),
+        destinationPath: destination,
+      )) {
+        final progress = jsonDecode(event) as Map<String, dynamic>;
+        final received = (progress['received'] as num).toInt();
+        final total = (progress['total'] as num?)?.toInt();
+        final now = DateTime.now();
+        final elapsed = now.difference(previousTime).inMilliseconds / 1000;
+        final speed = elapsed > 0 ? (received - previousBytes) / elapsed : 0.0;
+        previousBytes = received;
+        previousTime = now;
+        if (!mounted) return;
+        setState(() {
+          link.receivedBytes = received;
+          link.totalBytes = total;
+          link.speedBytesPerSecond = speed;
+        });
+      }
+      if (!mounted) return;
+      setState(() { link.savedPath = destination; link.isDownloading = false; link.isPaused = false; link.taskId = null; });
+      await _saveHistory();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $candidateName')));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
+      if (!link.isCancelled) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
+      }
+    }
+  }
+
+
+  Future<void> _pauseDownload(_LinkDraft link) async {
+    final taskId = link.taskId;
+    if (taskId == null || !link.isDownloading || link.isPaused) return;
+    try {
+      await rust_api.pauseDownload(taskId: taskId);
+      if (mounted) setState(() => link.isPaused = true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not pause this download.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _resumeDownload(_LinkDraft link) async {
+    final taskId = link.taskId;
+    if (taskId == null || !link.isDownloading || !link.isPaused) return;
+    try {
+      await rust_api.resumeDownload(taskId: taskId);
+      if (mounted) setState(() => link.isPaused = false);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not resume this download.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _cancelDownload(_LinkDraft link) async {
+    final taskId = link.taskId;
+    if (taskId == null || !link.isDownloading) return;
+    try {
+      await rust_api.cancelDownload(taskId: taskId);
+      link.isCancelled = true;
+      if (mounted) {
+        setState(() {
+          _links.remove(link);
+          link.isDownloading = false;
+          link.isPaused = false;
+          link.taskId = null;
+        });
+        await _saveHistory();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not cancel this download.')),
+        );
+      }
+    }
+  }
+
+  String _formatBytes(int bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = bytes.toDouble();
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return unit == 0 ? '${value.toStringAsFixed(0)} ${units[unit]}' : '${value.toStringAsFixed(1)} ${units[unit]}';
+  }
+
+  String _formatRemaining(int seconds) {
+    if (seconds < 60) return '${seconds}s left';
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (minutes < 60) {
+      return remainingSeconds == 0
+          ? '${minutes}m left'
+          : '${minutes}m ${remainingSeconds}s left';
+    }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    return remainingMinutes == 0
+        ? '${hours}h left'
+        : '${hours}h ${remainingMinutes}m left';
+  }
+
+  Future<void> _addLink() async {
+    final controller = TextEditingController();
+    String? errorText;
+
+    final result = await showDialog<Uri>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> validateAndSubmit() async {
+            try {
+              final normalized = await rust_api.validateDownloadUrl(
+                input: controller.text.trim(),
+              );
+              final uri = Uri.parse(normalized);
+              if (dialogContext.mounted) {
+                Navigator.of(dialogContext).pop(uri);
+              }
+            } catch (_) {
+              if (dialogContext.mounted) {
+                setDialogState(() => errorText =
+                    'Invalid URL. Enter a direct HTTP or HTTPS link.');
+              }
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Add a direct link'),
+            content: SizedBox(
+              width: 440,
+              child: TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.done,
+                onChanged: (_) {
+                  if (errorText != null) {
+                    setDialogState(() => errorText = null);
+                  }
+                },
+                onSubmitted: (_) async => validateAndSubmit(),
+                decoration: InputDecoration(
+                  hintText: 'https://example.com/file.zip',
+                  labelText: 'Download URL',
+                  border: const OutlineInputBorder(),
+                  errorText: errorText,
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: validateAndSubmit,
+                icon: const Icon(Icons.link_rounded),
+                label: const Text('Add link'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    controller.dispose();
+    if (!mounted || result == null) return;
+
+    final segment = result.pathSegments.isEmpty
+        ? ''
+        : Uri.decodeComponent(result.pathSegments.last);
+    final fileName = segment.isEmpty ? result.host : segment;
+
+    setState(() {
+      _links.insert(0, _LinkDraft(url: result, fileName: fileName));
+    });
+    await _saveHistory();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Link added to your download list.'),
+      ),
+    );
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    const violet = Color(0xFF8B5CF6);
+    const muted = Color(0xFF9A9AAF);
+    const panel = Color(0xFF151525);
+    final queuedCount = _links.where((link) => link.savedPath == null).length;
+    final downloadedCount = _links.where((link) => link.savedPath != null).length;
+    final visibleLinks = _links.where((link) {
+      final matchesFilter = _filter == 'All' ||
+          (_filter == 'Active' && link.isDownloading) ||
+          (_filter == 'Queued' && !link.isDownloading && link.savedPath == null) ||
+          (_filter == 'Completed' && link.savedPath != null);
+      final query = _searchQuery.trim().toLowerCase();
+      final matchesSearch = query.isEmpty ||
+          link.fileName.toLowerCase().contains(query) ||
+          link.url.toString().toLowerCase().contains(query);
+      return matchesFilter && matchesSearch;
+    }).toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 20,
+        title: const Row(
+          children: [
+            Icon(Icons.downloading_rounded, color: violet, size: 29),
+            SizedBox(width: 10),
+            Text('Easy Download',
+                style: TextStyle(fontWeight: FontWeight.w800)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: () => _showNotice(context),
+            icon: const Icon(Icons.tune_rounded),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addLink,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add download'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 100),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF29204A), Color(0xFF171727)],
+                ),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: violet.withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: violet.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: const Text(
+                      'DOWNLOAD MANAGER',
+                      style: TextStyle(
+                        color: Color(0xFFD4C5FF),
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Everything you\nwant to keep.',
+                    style: TextStyle(
+                      fontSize: 30,
+                      height: 1.12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  const Text(
+                    'Collect your download links in one simple place.',
+                    style: TextStyle(color: muted, height: 1.4),
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: _addLink,
+                    icon: const Icon(Icons.add_link_rounded),
+                    label: const Text('Add a link'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: _StatCard(
+                    label: 'Queued links',
+                    value: '$queuedCount',
+                    icon: Icons.link_rounded,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Downloaded',
+                    value: '$downloadedCount',
+                    icon: Icons.check_circle_outline_rounded,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 26),
+            Row(
+              children: [
+                const Text('Your links',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                if (downloadedCount > 0)
+                  TextButton.icon(
+                    onPressed: _clearCompleted,
+                    icon: const Icon(Icons.cleaning_services_rounded, size: 16),
+                    label: const Text('Clear completed'),
+                  )
+                else
+                  Text(
+                    queuedCount == 0 ? 'Nothing pending' : '$queuedCount pending',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              onChanged: (value) => setState(() => _searchQuery = value),
+              decoration: InputDecoration(
+                hintText: 'Search downloads',
+                prefixIcon: const Icon(Icons.search_rounded),
+                filled: true,
+                fillColor: panel,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['All', 'Active', 'Queued', 'Completed'].map((filter) {
+                  final selected = _filter == filter;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(filter),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _filter = filter),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_links.isEmpty)
+              const _EmptyState()
+            else if (visibleLinks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(child: Text('No downloads match this view.')),
+              )
+            else
+              ...visibleLinks.map((link) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: panel,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.06)),
+                      ),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        leading: Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: violet.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(Icons.insert_drive_file_outlined,
+                              color: violet),
+                        ),
+                        title: Text(link.fileName,
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 5),
+                          child: link.isDownloading
+                              ? Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '${_formatBytes(link.receivedBytes)} / ${link.totalBytes == null || link.totalBytes == 0 ? 'Unknown size' : _formatBytes(link.totalBytes!)}',
+                                      style: const TextStyle(color: muted, fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    LinearProgressIndicator(
+                                      value: link.totalBytes != null && link.totalBytes! > 0
+                                          ? (link.receivedBytes / link.totalBytes!).clamp(0.0, 1.0)
+                                          : null,
+                                      minHeight: 4,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}${link.totalBytes != null && link.totalBytes! > link.receivedBytes && link.speedBytesPerSecond > 0 ? '  •  ${_formatRemaining(((link.totalBytes! - link.receivedBytes) / link.speedBytesPerSecond).ceil())}' : ''}',
+                                      style: const TextStyle(color: muted, fontSize: 11),
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  link.savedPath ?? link.url.toString(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: muted, fontSize: 12),
+                                ),
+                        ),
+                        trailing: link.savedPath != null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80)),
+                                  IconButton(
+                                    tooltip: 'Copy saved path',
+                                    onPressed: () => _copySavedPath(link),
+                                    icon: const Icon(Icons.copy_rounded),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Remove from list',
+                                    onPressed: () => _removeLink(link),
+                                    icon: const Icon(Icons.delete_outline_rounded),
+                                  ),
+                                ],
+                              )
+                            : link.isDownloading
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: link.isPaused ? 'Resume' : 'Pause',
+                                        onPressed: () => link.isPaused
+                                            ? _resumeDownload(link)
+                                            : _pauseDownload(link),
+                                        icon: Icon(
+                                          link.isPaused
+                                              ? Icons.play_arrow_rounded
+                                              : Icons.pause_rounded,
+                                          color: violet,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Cancel download',
+                                        onPressed: () => _cancelDownload(link),
+                                        icon: const Icon(Icons.close_rounded),
+                                      ),
+                                    ],
+                                  )
+                                : Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'Download',
+                                        onPressed: () => _download(link),
+                                        icon: const Icon(Icons.download_rounded, color: violet),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Remove from list',
+                                        onPressed: () => _removeLink(link),
+                                        icon: const Icon(Icons.delete_outline_rounded),
+                                      ),
+                                    ],
+                                  ),
+                      ),
+                    ),
+                  )),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: panel,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline_rounded, color: violet, size: 21),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Downloads save inside app storage. Use pause, resume, or cancel while a download is active.',
+                      style: TextStyle(color: muted, height: 1.45, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static void _showNotice(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Settings will be added in a later step.')),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard(
+      {required this.label, required this.value, required this.icon});
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: const Color(0xFF8B5CF6), size: 22),
+            const SizedBox(height: 18),
+            Text(value,
+                style:
+                    const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Text(label,
+                style: const TextStyle(
+                    color: Color(0xFF9A9AAF), fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+        child: Column(
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B5CF6).withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.download_for_offline_outlined,
+                  size: 32, color: Color(0xFF8B5CF6)),
+            ),
+            const SizedBox(height: 14),
+            const Text('Nothing downloading yet',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            const Text(
+              'Add a direct link to place it in your session list.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF9A9AAF), height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+), '');
+      final finalName = portableName.isEmpty ? 'download-${DateTime.now().millisecondsSinceEpoch}' : portableName;
       // Avoid overwriting an existing file with the same name.
       var destination = directory.path + '/' + portableName;
       var candidateName = portableName;
