@@ -172,7 +172,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     var previousTime = DateTime.now();
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final safeName = link.fileName.replaceAll('/', '_');
+      final rawName = link.fileName.replaceAll('/', '_').replaceAll('\\\\', '_');
+      final safeName = rawName.trim().isEmpty || rawName == '.' || rawName == '..'
+          ? 'download-${DateTime.now().millisecondsSinceEpoch}'
+          : rawName;
       // Avoid overwriting an existing file with the same name.
       var destination = directory.path + '/' + safeName;
       var candidateName = safeName;
