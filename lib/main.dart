@@ -67,6 +67,7 @@ class _LinkDraft {
   bool isDownloading = false;
   bool isPaused = false;
   bool isCancelled = false;
+  bool isFailed = false;
   String? taskId;
   int receivedBytes = 0;
   int? totalBytes;
@@ -185,6 +186,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       link.isDownloading = true;
       link.isPaused = false;
       link.isCancelled = false;
+      link.isFailed = false;
       link.receivedBytes = 0;
       link.totalBytes = null;
       link.speedBytesPerSecond = 0;
@@ -241,7 +243,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $candidateName')));
     } catch (_) {
       if (!mounted) return;
-      setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; });
+      setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; link.isFailed = !link.isCancelled; });
       if (!link.isCancelled) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
       }
@@ -735,9 +737,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       IconButton(
-                                        tooltip: 'Download',
-                                        onPressed: () => _download(link),
-                                        icon: const Icon(Icons.download_rounded, color: violet),
+                                        tooltip: link.isFailed ? 'Retry download' : 'Download',
+                                        onPressed: () => link.isFailed ? _retryDownload(link) : _download(link),
+                                        icon: Icon(link.isFailed ? Icons.refresh_rounded : Icons.download_rounded, color: violet),
                                       ),
                                       IconButton(
                                         tooltip: 'Remove from list',
