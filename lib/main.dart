@@ -97,6 +97,7 @@ class DownloadHomePage extends StatefulWidget {
 class _DownloadHomePageState extends State<DownloadHomePage> {
   final List<_LinkDraft> _links = [];
   String _filter = 'All';
+  String _typeFilter = 'All';
   String _searchQuery = '';
   static const _historyKey = 'easy_download_history_v1';
 
