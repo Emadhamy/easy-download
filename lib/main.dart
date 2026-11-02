@@ -619,7 +619,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                   ],
                                 )
                               : Text(
-                                  link.url.toString(),
+                                  link.savedPath ?? link.url.toString(),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(color: muted, fontSize: 12),
