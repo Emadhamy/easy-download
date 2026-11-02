@@ -102,6 +102,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   String _searchQuery = '';
   String _sortBy = 'Newest';
   bool _showOnlyFailed = false;
+  bool _showOnlyPaused = false;
   static const _historyKey = 'easy_download_history_v1';
 
   @override
@@ -458,6 +459,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           link.url.toString().toLowerCase().contains(query) ||
           (link.savedPath?.toLowerCase().contains(query) ?? false);
       final matchesFailed = !_showOnlyFailed || link.isFailed;
+      final matchesPaused = !_showOnlyPaused || (link.isDownloading && link.isPaused);
       final matchesType = _typeFilter == 'All' ||
           (_typeFilter == 'Video' && _fileType(link.fileName) == 'Video') ||
           (_typeFilter == 'Audio' && _fileType(link.fileName) == 'Audio') ||
@@ -465,7 +467,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           (_typeFilter == 'Archives' && _fileType(link.fileName) == 'Archives') ||
           (_typeFilter == 'Documents' && _fileType(link.fileName) == 'Documents') ||
           (_typeFilter == 'Other' && _fileType(link.fileName) == 'Other');
-      return matchesFilter && matchesSearch && matchesType && matchesFailed;
+      return matchesFilter && matchesSearch && matchesType && matchesFailed && matchesPaused;
     }).toList();
     visibleLinks.sort((a, b) {
       if (_sortBy == 'Name') return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
@@ -616,6 +618,25 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               selected: _showOnlyFailed,
               onSelected: (selected) => setState(() => _showOnlyFailed = selected),
               avatar: const Icon(Icons.error_outline_rounded, size: 18),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                FilterChip(
+                  label: const Text('Failed downloads only'),
+                  selected: _showOnlyFailed,
+                  onSelected: (selected) => setState(() => _showOnlyFailed = selected),
+                  avatar: const Icon(Icons.error_outline_rounded, size: 18),
+                ),
+                FilterChip(
+                  label: const Text('Paused downloads only'),
+                  selected: _showOnlyPaused,
+                  onSelected: (selected) => setState(() => _showOnlyPaused = selected),
+                  avatar: const Icon(Icons.pause_circle_outline_rounded, size: 18),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             SingleChildScrollView(
