@@ -157,6 +157,35 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await _saveHistory();
   }
 
+  Future<void> _clearFailed() async {
+    final failed = _links.where((link) => link.isFailed && !link.isDownloading).toList();
+    if (failed.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear failed downloads?'),
+        content: Text('Remove ${failed.length} failed item(s) from the list?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear failed'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _links.removeWhere((link) => link.isFailed && !link.isDownloading));
+    await _saveHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Removed ${failed.length} failed item(s).')),
+    );
+  }
+
   Future<void> _clearCompleted() async {
     final completed = _links.where((link) => link.savedPath != null).toList();
     if (completed.isEmpty) return;
@@ -585,7 +614,13 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const Text('Your links',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
-                if (downloadedCount > 0)
+                if (_links.any((link) => link.isFailed && !link.isDownloading))
+                  TextButton.icon(
+                    onPressed: _clearFailed,
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                    label: const Text('Clear failed'),
+                  )
+                else if (downloadedCount > 0)
                   TextButton.icon(
                     onPressed: _clearCompleted,
                     icon: const Icon(Icons.cleaning_services_rounded, size: 16),
@@ -611,13 +646,6 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   borderSide: BorderSide.none,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            FilterChip(
-              label: const Text('Failed downloads only'),
-              selected: _showOnlyFailed,
-              onSelected: (selected) => setState(() => _showOnlyFailed = selected),
-              avatar: const Icon(Icons.error_outline_rounded, size: 18),
             ),
             const SizedBox(height: 8),
             Wrap(
