@@ -249,6 +249,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
 
+  Future<void> _retryDownload(_LinkDraft link) async {
+    if (link.isDownloading || link.savedPath != null) return;
+    await _download(link);
+  }
+
   Future<void> _pauseDownload(_LinkDraft link) async {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading || link.isPaused) return;
