@@ -376,6 +376,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     controller.dispose();
     if (!mounted || result == null) return;
 
+    final alreadyAdded = _links.any((link) => link.url.toString() == result.toString());
+    if (alreadyAdded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This link is already in your download list.')),
+      );
+      return;
+    }
+
     final segment = result.pathSegments.isEmpty
         ? ''
         : Uri.decodeComponent(result.pathSegments.last);
