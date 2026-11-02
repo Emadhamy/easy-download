@@ -40,6 +40,16 @@ class EasyDownloadApp extends StatelessWidget {
   }
 }
 
+IconData _downloadIconForName(String name) {
+  final extension = name.split('.').last.toLowerCase();
+  if (['mp4', 'mkv', 'mov', 'webm', 'avi'].contains(extension)) return Icons.movie_outlined;
+  if (['mp3', 'wav', 'flac', 'm4a', 'ogg'].contains(extension)) return Icons.audio_file_outlined;
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].contains(extension)) return Icons.image_outlined;
+  if (['zip', 'rar', '7z', 'tar', 'gz'].contains(extension)) return Icons.folder_zip_outlined;
+  if (extension == 'pdf') return Icons.picture_as_pdf_outlined;
+  return Icons.insert_drive_file_outlined;
+}
+
 class _LinkDraft {
   _LinkDraft({required this.url, required this.fileName});
   final Uri url;
@@ -602,7 +612,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                             color: violet.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          child: const Icon(Icons.insert_drive_file_outlined,
+                          child: Icon(_downloadIconForName(link.fileName),
                               color: violet),
                         ),
                         title: Text(link.fileName,
