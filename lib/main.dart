@@ -176,15 +176,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       final safeName = rawName.trim().isEmpty || rawName == '.' || rawName == '..'
           ? 'download-${DateTime.now().millisecondsSinceEpoch}'
           : rawName;
+      // Prevent control characters and Windows-reserved filename symbols.
+      final portableName = safeName.replaceAll(RegExp(r'[<>:"|?*\\x00-\\x1F]'), '_');
       // Avoid overwriting an existing file with the same name.
-      var destination = directory.path + '/' + safeName;
-      var candidateName = safeName;
+      var destination = directory.path + '/' + portableName;
+      var candidateName = portableName;
       var suffix = 1;
       while (await File(destination).exists()) {
-        final dot = safeName.lastIndexOf('.');
+        final dot = portableName.lastIndexOf('.');
         final hasExtension = dot > 0;
-        final baseName = hasExtension ? safeName.substring(0, dot) : safeName;
-        final extension = hasExtension ? safeName.substring(dot) : '';
+        final baseName = hasExtension ? portableName.substring(0, dot) : portableName;
+        final extension = hasExtension ? portableName.substring(dot) : '';
         candidateName = '$baseName ($suffix)$extension';
         destination = directory.path + '/' + candidateName;
         suffix++;
