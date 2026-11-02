@@ -100,6 +100,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   String _filter = 'All';
   String _typeFilter = 'All';
   String _searchQuery = '';
+  String _sortBy = 'Newest';
   static const _historyKey = 'easy_download_history_v1';
 
   @override
@@ -464,6 +465,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           (_typeFilter == 'Other' && _fileType(link.fileName) == 'Other');
       return matchesFilter && matchesSearch && matchesType;
     }).toList();
+    visibleLinks.sort((a, b) {
+      if (_sortBy == 'Name') return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
+      if (_sortBy == 'Largest') return (b.totalBytes ?? b.receivedBytes).compareTo(a.totalBytes ?? a.receivedBytes);
+      if (_sortBy == 'Smallest') return (a.totalBytes ?? a.receivedBytes).compareTo(b.totalBytes ?? b.receivedBytes);
+      return _links.indexOf(a).compareTo(_links.indexOf(b));
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -599,6 +606,23 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
                 ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['Newest', 'Name', 'Largest', 'Smallest'].map((sort) {
+                  final selected = _sortBy == sort;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text('Sort: $sort'),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _sortBy = sort),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
             const SizedBox(height: 10),
