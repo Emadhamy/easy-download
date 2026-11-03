@@ -133,6 +133,28 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await prefs.setString(_historyKey, jsonEncode(_links.map((item) => item.toJson()).toList()));
   }
 
+  Future<void> _exportDownloadList() async {
+    if (_links.isEmpty) return;
+    final lines = _links.map((link) {
+      final status = link.isDownloading
+          ? (link.isPaused ? 'Paused' : 'Downloading')
+          : link.isFailed
+              ? 'Failed'
+              : link.savedPath != null
+                  ? 'Completed'
+                  : link.isCancelled
+                      ? 'Cancelled'
+                      : 'Queued';
+      return '${link.fileName}\nURL: ${link.url}\nStatus: $status'
+          '${link.savedPath == null ? '' : '\nSaved to: ${link.savedPath}'}';
+    }).join('\n\n');
+    await Clipboard.setData(ClipboardData(text: lines));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Download list copied to clipboard.')),
+    );
+  }
+
   Future<void> _copyDownloadUrl(_LinkDraft link) async {
     await Clipboard.setData(ClipboardData(text: link.url.toString()));
     if (!mounted) return;
@@ -832,6 +854,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const Text('Your links',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
+                if (_links.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Export download list',
+                    onPressed: _exportDownloadList,
+                    icon: const Icon(Icons.ios_share_rounded),
+                  ),
                 if (_links.any((link) => !link.isDownloading))
                   TextButton.icon(
                     onPressed: _clearAllHistory,
