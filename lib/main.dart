@@ -458,6 +458,15 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
 
+  Future<void> _resumeAllPaused() async {
+    final paused = _links.where((link) =>
+        link.isDownloading && link.isPaused && link.taskId != null).toList();
+    for (final link in paused) {
+      if (!mounted) return;
+      await _resumeDownload(link);
+    }
+  }
+
   Future<void> _pauseAllActive() async {
     final active = _links.where((link) =>
         link.isDownloading && !link.isPaused && link.taskId != null).toList();
@@ -770,6 +779,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                     icon: const Icon(Icons.add_link_rounded),
                     label: const Text('Add a link'),
                   ),
+                  if (_links.any((link) => link.isDownloading && link.isPaused)) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _resumeAllPaused,
+                      icon: const Icon(Icons.play_circle_outline_rounded),
+                      label: const Text('Resume all paused'),
+                    ),
+                  ],
                   if (_links.any((link) => link.isDownloading && !link.isPaused)) ...[
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
