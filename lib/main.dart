@@ -157,6 +157,38 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await _saveHistory();
   }
 
+  Future<void> _clearAllHistory() async {
+    final removable = _links.where((link) => !link.isDownloading).toList();
+    if (removable.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear download history?'),
+        content: Text(
+          'Remove ${removable.length} inactive item(s) from the list? '
+          'Active downloads will continue.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _links.removeWhere((link) => !link.isDownloading));
+    await _saveHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Removed ${removable.length} inactive item(s).')),
+    );
+  }
+
   Future<void> _clearQueued() async {
     final queued = _links.where((link) =>
         !link.isDownloading && link.savedPath == null && !link.isFailed).toList();
@@ -645,7 +677,13 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const Text('Your links',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
-                if (_links.any((link) => !link.isDownloading && link.savedPath == null && !link.isFailed))
+                if (_links.any((link) => !link.isDownloading))
+                  TextButton.icon(
+                    onPressed: _clearAllHistory,
+                    icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                    label: const Text('Clear history'),
+                  )
+                else if (_links.any((link) => !link.isDownloading && link.savedPath == null && !link.isFailed))
                   TextButton.icon(
                     onPressed: _clearQueued,
                     icon: const Icon(Icons.playlist_remove_rounded, size: 16),
