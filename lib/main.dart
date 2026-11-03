@@ -458,6 +458,15 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
 
+  Future<void> _downloadAllQueued() async {
+    final queued = _links.where((link) =>
+        !link.isDownloading && link.savedPath == null && !link.isFailed).toList();
+    for (final link in queued) {
+      if (!mounted) return;
+      await _download(link);
+    }
+  }
+
   Future<void> _retryDownload(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
     await _download(link);
@@ -752,6 +761,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                     icon: const Icon(Icons.add_link_rounded),
                     label: const Text('Add a link'),
                   ),
+                  if (_links.any((link) => !link.isDownloading && link.savedPath == null && !link.isFailed)) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _downloadAllQueued,
+                      icon: const Icon(Icons.playlist_play_rounded),
+                      label: const Text('Download all queued'),
+                    ),
+                  ],
                 ],
               ),
             ),
