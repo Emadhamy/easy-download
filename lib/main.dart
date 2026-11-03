@@ -157,6 +157,37 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await _saveHistory();
   }
 
+  Future<void> _clearQueued() async {
+    final queued = _links.where((link) =>
+        !link.isDownloading && link.savedPath == null && !link.isFailed).toList();
+    if (queued.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear queued downloads?'),
+        content: Text('Remove ${queued.length} queued item(s) from the list?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear queued'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _links.removeWhere((link) =>
+        !link.isDownloading && link.savedPath == null && !link.isFailed));
+    await _saveHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Removed ${queued.length} queued item(s).')),
+    );
+  }
+
   Future<void> _clearFailed() async {
     final failed = _links.where((link) => link.isFailed && !link.isDownloading).toList();
     if (failed.isEmpty) return;
@@ -614,7 +645,13 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const Text('Your links',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
-                if (_links.any((link) => link.isFailed && !link.isDownloading))
+                if (_links.any((link) => !link.isDownloading && link.savedPath == null && !link.isFailed))
+                  TextButton.icon(
+                    onPressed: _clearQueued,
+                    icon: const Icon(Icons.playlist_remove_rounded, size: 16),
+                    label: const Text('Clear queued'),
+                  )
+                else if (_links.any((link) => link.isFailed && !link.isDownloading))
                   TextButton.icon(
                     onPressed: _clearFailed,
                     icon: const Icon(Icons.delete_sweep_outlined, size: 16),
