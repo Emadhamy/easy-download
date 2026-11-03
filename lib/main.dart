@@ -63,7 +63,7 @@ IconData _downloadIconForName(String name) {
 class _LinkDraft {
   _LinkDraft({required this.url, required this.fileName});
   final Uri url;
-  final String fileName;
+  String fileName;
   bool isDownloading = false;
   bool isPaused = false;
   bool isCancelled = false;
@@ -154,6 +154,49 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _removeLink(_LinkDraft link) async {
     if (link.isDownloading) return;
     setState(() => _links.remove(link));
+    await _saveHistory();
+  }
+
+  Future<void> _renameDownload(_LinkDraft link) async {
+    if (link.isDownloading || link.savedPath != null) return;
+    final controller = TextEditingController(text: link.fileName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename download'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value.trim()),
+          decoration: const InputDecoration(
+            labelText: 'File name',
+            hintText: 'Enter a file name',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || newName == null) return;
+    final cleaned = newName.replaceAll('/', '_').replaceAll('\\\\', '_').trim();
+    if (cleaned.isEmpty || cleaned == '.' || cleaned == '..') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid file name.')),
+      );
+      return;
+    }
+    setState(() => link.fileName = cleaned);
     await _saveHistory();
   }
 
@@ -877,6 +920,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                               color: violet),
                         ),
                         title: InkWell(
+                          onLongPress: () => _renameDownload(link),
                           onTap: () => _showDownloadDetails(link),
                           borderRadius: BorderRadius.circular(4),
                           child: Text(
