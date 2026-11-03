@@ -196,6 +196,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       );
       return;
     }
+    final duplicate = _links.any((item) =>
+        !identical(item, link) && item.fileName.trim().toLowerCase() == cleaned.toLowerCase());
+    if (duplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A download with this file name already exists.')),
+      );
+      return;
+    }
     setState(() => link.fileName = cleaned);
     await _saveHistory();
   }
