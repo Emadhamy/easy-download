@@ -157,6 +157,59 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await _saveHistory();
   }
 
+  Future<void> _showDownloadDetails(_LinkDraft link) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(link.fileName),
+        content: SizedBox(
+          width: 440,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Download URL', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                SelectableText(link.url.toString()),
+                const SizedBox(height: 12),
+                const Text('File type', style: TextStyle(fontWeight: FontWeight.w700)),
+                Text(_fileType(link.fileName)),
+                const SizedBox(height: 12),
+                const Text('Status', style: TextStyle(fontWeight: FontWeight.w700)),
+                Text(link.isDownloading
+                    ? (link.isPaused ? 'Paused' : 'Downloading')
+                    : link.isFailed
+                        ? 'Failed'
+                        : link.savedPath != null
+                            ? 'Completed'
+                            : link.isCancelled
+                                ? 'Cancelled'
+                                : 'Queued'),
+                if (link.totalBytes != null) ...[
+                  const SizedBox(height: 12),
+                  const Text('File size', style: TextStyle(fontWeight: FontWeight.w700)),
+                  Text(_formatBytes(link.totalBytes!)),
+                ],
+                if (link.savedPath != null) ...[
+                  const SizedBox(height: 12),
+                  const Text('Saved location', style: TextStyle(fontWeight: FontWeight.w700)),
+                  SelectableText(link.savedPath!),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _clearAllHistory() async {
     final removable = _links.where((link) => !link.isDownloading).toList();
     if (removable.isEmpty) return;
@@ -823,9 +876,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                           child: Icon(_downloadIconForName(link.fileName),
                               color: violet),
                         ),
-                        title: Text(link.fileName,
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        title: InkWell(
+                          onTap: () => _showDownloadDetails(link),
+                          borderRadius: BorderRadius.circular(4),
+                          child: Text(
+                            link.fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 5),
                           child: link.isDownloading
