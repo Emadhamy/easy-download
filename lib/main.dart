@@ -103,6 +103,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   String _sortBy = 'Newest';
   bool _showOnlyFailed = false;
   bool _showOnlyPaused = false;
+  final Set<_LinkDraft> _selectedLinks = {};
+  bool _selectionMode = false;
   static const _historyKey = 'easy_download_history_v1';
 
   @override
@@ -170,6 +172,21 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Saved file path copied.')),
+    );
+  }
+
+  Future<void> _removeSelectedLinks() async {
+    final removable = _selectedLinks.where((link) => !link.isDownloading).toList();
+    if (removable.isEmpty) return;
+    setState(() {
+      _links.removeWhere((link) => removable.contains(link));
+      _selectedLinks.clear();
+      _selectionMode = false;
+    });
+    await _saveHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Removed ${removable.length} selected item(s).')),
     );
   }
 
@@ -854,6 +871,33 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const Text('Your links',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const Spacer(),
+                if (_selectionMode) ...[
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _selectedLinks
+                        ..clear()
+                        ..addAll(visibleLinks.where((link) => !link.isDownloading));
+                    }),
+                    child: const Text('Select all'),
+                  ),
+                  TextButton(
+                    onPressed: _removeSelectedLinks,
+                    child: Text('Remove (${_selectedLinks.length})'),
+                  ),
+                  IconButton(
+                    tooltip: 'Exit selection',
+                    onPressed: () => setState(() {
+                      _selectionMode = false;
+                      _selectedLinks.clear();
+                    }),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ] else if (_links.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Select downloads',
+                    onPressed: () => setState(() => _selectionMode = true),
+                    icon: const Icon(Icons.checklist_rounded),
+                  ),
                 if (_links.isNotEmpty)
                   IconButton(
                     tooltip: 'Export download list',
@@ -996,7 +1040,20 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 8),
-                        leading: Container(
+                        leading: _selectionMode
+                            ? Checkbox(
+                                value: _selectedLinks.contains(link),
+                                onChanged: link.isDownloading
+                                    ? null
+                                    : (checked) => setState(() {
+                                          if (checked == true) {
+                                            _selectedLinks.add(link);
+                                          } else {
+                                            _selectedLinks.remove(link);
+                                          }
+                                        }),
+                              )
+                            : Container(
                           width: 46,
                           height: 46,
                           decoration: BoxDecoration(
