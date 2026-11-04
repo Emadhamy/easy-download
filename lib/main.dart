@@ -904,6 +904,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                     child: const Text('Select all'),
                   ),
                   TextButton(
+                    onPressed: () => setState(() {
+                      final selectable = visibleLinks.where((link) => !link.isDownloading).toSet();
+                      final previouslySelected = _selectedLinks.toSet();
+                      _selectedLinks
+                        ..clear()
+                        ..addAll(selectable.difference(previouslySelected));
+                    }),
+                    child: const Text('Invert'),
+                  ),
+                  TextButton(
                     onPressed: _removeSelectedLinks,
                     child: Text('Remove (${_selectedLinks.length})'),
                   ),
