@@ -200,7 +200,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<void> _copySelectedLinks() async {
     if (_selectedLinks.isEmpty) return;
-    final urls = _selectedLinks.map((link) => link.url.toString()).join('\\n');
+    final urls = _selectedLinks.map((link) => link.url.toString()).join('\n');
     await Clipboard.setData(ClipboardData(text: urls));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
