@@ -157,6 +157,29 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
   }
 
+  Future<void> _pasteLinksFromClipboard() async {
+    final data = await Clipboard.getData('text/plain');
+    final raw = data?.text ?? '';
+    final candidates = raw.split(RegExp(r'\\s+'))
+        .map((value) => Uri.tryParse(value.trim()))
+        .whereType<Uri>()
+        .where((uri) => (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty)
+        .toSet();
+    var added = 0;
+    for (final uri in candidates) {
+      if (_links.any((link) => link.url == uri)) continue;
+      final segment = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last;
+      _links.add(_LinkDraft(url: uri, fileName: segment.isEmpty ? uri.host : Uri.decodeComponent(segment)));
+      added++;
+    }
+    if (!mounted) return;
+    setState(() {});
+    await _saveHistory();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(added == 0 ? 'No new valid links found.' : 'Added $added link(s) from clipboard.'),
+    ));
+  }
+
   Future<void> _copyDownloadUrl(_LinkDraft link) async {
     await Clipboard.setData(ClipboardData(text: link.url.toString()));
     if (!mounted) return;
@@ -900,7 +923,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   ),
                 if (_links.isNotEmpty)
                   IconButton(
-                    tooltip: 'Export download list',
+                    tooltip: 'Paste links from clipboard',\n                    onPressed: _pasteLinksFromClipboard,\n                    icon: const Icon(Icons.content_paste_go_rounded),\n                  ),\n                if (_links.isNotEmpty)\n                  IconButton(\n                    tooltip: 'Export download list',
                     onPressed: _exportDownloadList,
                     icon: const Icon(Icons.ios_share_rounded),
                   ),
