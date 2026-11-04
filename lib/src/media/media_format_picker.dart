@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'media_models.dart';
 
-/// A presentation-only format picker. The media engine is connected in a
-/// later step; this widget receives inspected formats from its caller.
+/// Presentation-only format picker. The engine is connected in a later step.
 class MediaFormatPicker extends StatefulWidget {
   const MediaFormatPicker({
     super.key,
     required this.inspection,
+    required this.outputPath,
     required this.onQueue,
   });
 
   final MediaInspection inspection;
+  final String outputPath;
   final ValueChanged<MediaTaskRequest> onQueue;
 
   @override
@@ -49,24 +50,16 @@ class _MediaFormatPickerState extends State<MediaFormatPicker> {
               padding: const EdgeInsets.all(16),
               child: SegmentedButton<MediaOutputKind>(
                 segments: const [
-                  ButtonSegment(
-                    value: MediaOutputKind.video,
-                    label: Text('Video'),
-                    icon: Icon(Icons.videocam_outlined),
-                  ),
-                  ButtonSegment(
-                    value: MediaOutputKind.audio,
-                    label: Text('Audio'),
-                    icon: Icon(Icons.headphones_outlined),
-                  ),
+                  ButtonSegment(value: MediaOutputKind.video,
+                      label: Text('Video'), icon: Icon(Icons.videocam_outlined)),
+                  ButtonSegment(value: MediaOutputKind.audio,
+                      label: Text('Audio'), icon: Icon(Icons.headphones_outlined)),
                 ],
                 selected: {_output},
-                onSelectionChanged: (values) {
-                  setState(() {
-                    _output = values.first;
-                    _selected = null;
-                  });
-                },
+                onSelectionChanged: (values) => setState(() {
+                  _output = values.first;
+                  _selected = null;
+                }),
               ),
             ),
             Expanded(
@@ -75,8 +68,7 @@ class _MediaFormatPickerState extends State<MediaFormatPicker> {
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       itemCount: formats.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 8),
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final format = formats[index];
                         final isSelected = format == selected;
@@ -87,9 +79,8 @@ class _MediaFormatPickerState extends State<MediaFormatPicker> {
                                 : Icons.audiotrack_outlined),
                             title: Text(format.label),
                             subtitle: Text(_details(format)),
-                            trailing: isSelected
-                                ? const Icon(Icons.check_circle)
-                                : const Icon(Icons.circle_outlined),
+                            trailing: Icon(isSelected
+                                ? Icons.check_circle : Icons.circle_outlined),
                             selected: isSelected,
                             onTap: () => setState(() => _selected = format),
                           ),
@@ -100,13 +91,13 @@ class _MediaFormatPickerState extends State<MediaFormatPicker> {
             Padding(
               padding: const EdgeInsets.all(16),
               child: FilledButton.icon(
-                onPressed: selected == null
-                    ? null
-                    : () => widget.onQueue(MediaTaskRequest(
-                          source: widget.inspection.source,
-                          format: selected,
-                          outputKind: _output,
-                        )),
+                onPressed: selected == null ? null : () => widget.onQueue(
+                  MediaTaskRequest(
+                    source: widget.inspection.source,
+                    format: selected,
+                    outputPath: widget.outputPath,
+                  ),
+                ),
                 icon: const Icon(Icons.add_to_queue),
                 label: const Text('Add to downloads'),
               ),
@@ -122,14 +113,11 @@ class _MediaFormatPickerState extends State<MediaFormatPicker> {
     if (format.width != null && format.height != null) {
       parts.add('${format.width} × ${format.height}');
     }
-    if (format.bitrateKbps != null) {
-      parts.add('${format.bitrateKbps} kb/s');
-    }
-    if (format.estimatedSizeBytes != null) {
-      parts.add(_formatBytes(format.estimatedSizeBytes!));
-    }
+    if (format.bitrateKbps != null) parts.add('${format.bitrateKbps} kb/s');
+    if (format.fileSizeBytes != null) parts.add(_formatBytes(format.fileSizeBytes!));
     if (format.requiresMerge) parts.add('Audio/video merge');
-    return parts.isEmpty ? format.container.name.toUpperCase() : parts.join(' • ');
+    if (parts.isEmpty) parts.add(format.container.name.toUpperCase());
+    return parts.join(' • ');
   }
 
   String _formatBytes(int bytes) {
