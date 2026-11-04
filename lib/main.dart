@@ -78,13 +78,21 @@ class _LinkDraft {
         'url': url.toString(),
         'fileName': fileName,
         'savedPath': savedPath,
+        'isFailed': isFailed,
+        'isCancelled': isCancelled,
+        'receivedBytes': receivedBytes,
+        'totalBytes': totalBytes,
       };
 
   static _LinkDraft? fromJson(Map<String, dynamic> json) {
     final parsed = Uri.tryParse(json['url'] as String? ?? '');
     if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) return null;
     return _LinkDraft(url: parsed, fileName: json['fileName'] as String? ?? parsed.host)
-      ..savedPath = json['savedPath'] as String?;
+      ..savedPath = json['savedPath'] as String?
+      ..isFailed = json['isFailed'] as bool? ?? false
+      ..isCancelled = json['isCancelled'] as bool? ?? false
+      ..receivedBytes = (json['receivedBytes'] as num?)?.toInt() ?? 0
+      ..totalBytes = (json['totalBytes'] as num?)?.toInt();
   }
 }
 
@@ -124,7 +132,19 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           .map(_LinkDraft.fromJson)
           .whereType<_LinkDraft>()
           .toList();
-      setState(() { _links..clear()..addAll(restored); });
+      setState(() {
+        _links
+          ..clear()
+          ..addAll(restored);
+        // A running task cannot survive an app restart; restore it as queued.
+        for (final link in _links) {
+          link.isDownloading = false;
+          link.isPaused = false;
+          link.taskId = null;
+          link.speedBytesPerSecond = 0;
+        }
+      });
+      await _saveHistory();
     } catch (_) {
       // Keep the app usable if local history is invalid.
     }
