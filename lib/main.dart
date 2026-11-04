@@ -198,6 +198,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
   }
 
+  Future<void> _copySelectedLinks() async {
+    if (_selectedLinks.isEmpty) return;
+    final urls = _selectedLinks.map((link) => link.url.toString()).join('\\n');
+    await Clipboard.setData(ClipboardData(text: urls));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copied ${_selectedLinks.length} selected URL(s).')),
+    );
+  }
+
   Future<void> _removeSelectedLinks() async {
     final removable = _selectedLinks.where((link) => !link.isDownloading).toList();
     if (removable.isEmpty) return;
@@ -912,6 +922,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                         ..addAll(selectable.difference(previouslySelected));
                     }),
                     child: const Text('Invert'),
+                  ),
+                  TextButton(
+                    onPressed: _copySelectedLinks,
+                    child: const Text('Copy URLs'),
                   ),
                   TextButton(
                     onPressed: _removeSelectedLinks,
