@@ -923,7 +923,13 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   ),
                 if (_links.isNotEmpty)
                   IconButton(
-                    tooltip: 'Paste links from clipboard',\n                    onPressed: _pasteLinksFromClipboard,\n                    icon: const Icon(Icons.content_paste_go_rounded),\n                  ),\n                if (_links.isNotEmpty)\n                  IconButton(\n                    tooltip: 'Export download list',
+                    tooltip: 'Paste links from clipboard',
+                    onPressed: _pasteLinksFromClipboard,
+                    icon: const Icon(Icons.content_paste_go_rounded),
+                  ),
+                if (_links.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Export download list',
                     onPressed: _exportDownloadList,
                     icon: const Icon(Icons.ios_share_rounded),
                   ),
