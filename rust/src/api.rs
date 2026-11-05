@@ -6,7 +6,8 @@
 use crate::{download_to_path, download_to_path_with_control, download_to_path_with_progress, DownloadControl, DownloadUrl};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use flutter_rust_bridge::{frb, StreamSink};
+use flutter_rust_bridge::frb;
+use crate::frb_generated::StreamSink;
 use serde_json;
 
 // Controls are retained by task ID so Flutter can send pause/resume/cancel
