@@ -32,6 +32,9 @@ jobs:
       - name: Install JSON Schema validator
         run: python -m pip install --disable-pip-version-check jsonschema
 
+      - name: Run managed tools manifest unit tests
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py'
+
       - name: Validate manifest and negative cases
         run: |
           python - <<'PY'
