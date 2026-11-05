@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Emadhamy/easy-download/blob/main/rust/resources/managed-tools/manifest.schema.json",
+  "title": "Easy Download managed tools manifest",
+  "type": "object",
+  "required": [
+    "manifestVersion",
+    "status",
+    "tools"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "manifestVersion": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "unconfigured",
+        "ready"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "tools": {
+      "type": "object",
+      "required": [
+        "ytDlp",
+        "ffmpeg"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ytDlp": {
+          "$ref": "#/$defs/tool"
+        },
+        "ffmpeg": {
+          "$ref": "#/$defs/tool"
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "releases"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "releases": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(windows|linux|android)-(x86_64|aarch64|armv7)$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/release"
+          }
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": [
+        "version",
+        "url",
+        "archiveFormat",
+        "sha256",
+        "executablePath"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "archiveFormat": {
+          "enum": [
+            "zip",
+            "tar.gz",
+            "tar.xz",
+            "binary"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "executablePath": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
