@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "manifestVersion": 1,
+  "status": "unconfigured",
+  "description": "Trusted release metadata for independently managed yt-dlp and FFmpeg binaries.",
+  "tools": {
+    "ytDlp": {
+      "enabled": false,
+      "releases": {}
+    },
+    "ffmpeg": {
+      "enabled": false,
+      "releases": {}
+    }
+  },
+  "notes": [
+    "No executable download is enabled until official release URLs and independently verified SHA-256 digests are supplied.",
+    "Release entries are keyed by an explicit target identifier, for example windows-x86_64, linux-x86_64, linux-aarch64, android-aarch64.",
+    "Each release entry must include version, url, archiveFormat, sha256, and executablePath.",
+    "Do not populate this file with guessed URLs or placeholder digests; the updater must fail closed when a target entry is missing."
+  ]
+}
