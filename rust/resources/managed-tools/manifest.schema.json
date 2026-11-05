@@ -69,7 +69,28 @@
             "$ref": "#/$defs/release"
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "properties": {
+              "releases": {
+                "minProperties": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "release": {
       "type": "object",
