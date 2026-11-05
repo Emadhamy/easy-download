@@ -6,11 +6,17 @@ on:
       - 'rust/resources/managed-tools/manifest.json'
       - 'rust/resources/managed-tools/manifest.schema.json'
       - '.github/workflows/validate-managed-tools.yml'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
+      - 'rust/src/**/*.rs'
   pull_request:
     paths:
       - 'rust/resources/managed-tools/manifest.json'
       - 'rust/resources/managed-tools/manifest.schema.json'
       - '.github/workflows/validate-managed-tools.yml'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
+      - 'rust/src/**/*.rs'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +29,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path rust/Cargo.toml
 
       - name: Set up Python
         uses: actions/setup-python@v5
