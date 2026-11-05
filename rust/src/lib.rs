@@ -3,6 +3,7 @@
 // The Rust download functions are not connected to the Flutter interface yet.
 
 pub mod api;
+pub mod managed_tools;
 
 use std::fs::File;
 use std::io::{Read, Write};
