@@ -82,9 +82,8 @@ jobs:
           enabled_without_release['tools']['ytDlp']['enabled'] = True
           if enabled_without_release['tools']['ytDlp']['releases']:
               raise SystemExit('Negative test setup failed: expected empty releases.')
-          if enabled_without_release['tools']['ytDlp']['enabled'] and not enabled_without_release['tools']['ytDlp']['releases']:
-              print('Negative test passed: enabled tool without a release is detected.')
-          else:
-              raise SystemExit('Negative test failed: missing release was not detected.')
+          if not list(validator.iter_errors(enabled_without_release)):
+              raise SystemExit('Negative test failed: enabled tool without a release was accepted.')
+          print('Negative test passed: enabled tool without a release is rejected by the schema.')
           print('Negative validation cases passed.')
           PY
