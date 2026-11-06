@@ -9,6 +9,8 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'rust/src/**/*.rs'
+      - 'flutter_rust_bridge.yaml'
+      - 'lib/src/rust/**'
   pull_request:
     paths:
       - 'rust/resources/managed-tools/manifest.json'
@@ -17,6 +19,8 @@ on:
       - 'rust/Cargo.toml'
       - 'rust/Cargo.lock'
       - 'rust/src/**/*.rs'
+      - 'flutter_rust_bridge.yaml'
+      - 'lib/src/rust/**'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +36,18 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Flutter for bridge generation
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter Rust Bridge code generator
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: Generate Rust bridge module
+        run: flutter_rust_bridge_codegen generate
 
       - name: Run Rust unit tests
         run: cargo test --manifest-path rust/Cargo.toml
