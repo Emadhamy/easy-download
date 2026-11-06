@@ -29,6 +29,16 @@ Future<void> resumeDownload({required String taskId}) =>
 Future<void> cancelDownload({required String taskId}) =>
     RustLib.instance.api.crateApiCancelDownload(taskId: taskId);
 
+/// Returns the canonical OS/CPU key for this application build.
+Future<String> getCurrentPlatformTarget() =>
+    RustLib.instance.api.crateApiGetCurrentPlatformTarget();
+
+/// Returns trusted release metadata as JSON for the current platform.
+/// None means the tool is disabled or no release is configured for this target.
+/// This function never downloads or executes a binary.
+Future<String?> getManagedToolRelease({required String toolName}) =>
+    RustLib.instance.api.crateApiGetManagedToolRelease(toolName: toolName);
+
 /// Validates and normalizes a direct HTTP(S) download URL.
 Future<String> validateDownloadUrl({required String input}) =>
     RustLib.instance.api.crateApiValidateDownloadUrl(input: input);
