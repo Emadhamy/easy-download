@@ -3,7 +3,7 @@
 //! This module intentionally does not download or execute binaries. It provides
 //! a fail-closed foundation for a later updater implementation.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,7 +35,7 @@ pub struct ManagedTool {
     pub releases: BTreeMap<String, Release>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Release {
     pub version: String,
@@ -116,6 +116,54 @@ impl Manifest {
     }
 }
 
+/// A canonical platform identifier used as a manifest release key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    os: String,
+    arch: String,
+}
+
+impl Target {
+    /// Build a target from explicit, canonical OS and architecture names.
+    /// Unsupported combinations are rejected instead of guessed.
+    pub fn from_parts(os: &str, arch: &str) -> Result<Self, ManifestError> {
+        let key = format!("{os}-{arch}");
+        if !valid_target(&key) {
+            return Err(ManifestError::InvalidReleaseTarget(key));
+        }
+        Ok(Self { os: os.to_owned(), arch: arch.to_owned() })
+    }
+
+    /// Detect the current Rust compilation target.
+    pub fn current() -> Result<Self, ManifestError> {
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "x86_64",
+            "aarch64" => "aarch64",
+            // Do not assume every 32-bit ARM target is ARMv7.
+            other => return Err(ManifestError::InvalidReleaseTarget(
+                format!("{}-{other}", std::env::consts::OS)
+            )),
+        };
+        Self::from_parts(std::env::consts::OS, arch)
+    }
+
+    /// Return the exact key used by the managed-tools manifest.
+    pub fn key(&self) -> String {
+        format!("{}-{}", self.os, self.arch)
+    }
+}
+
+impl Manifest {
+    /// Find an enabled tool release for the current operating system and CPU.
+    pub fn release_for_current_platform(
+        &self,
+        kind: ToolKind,
+    ) -> Result<Option<&Release>, ManifestError> {
+        let target = Target::current()?;
+        Ok(self.release(kind, &target.key()))
+    }
+}
+
 fn valid_target(target: &str) -> bool {
     let mut parts = target.split('-');
     let os = parts.next();
@@ -146,6 +194,27 @@ mod tests {
         assert_eq!(manifest.status, ManifestStatus::Unconfigured);
         assert!(!manifest.tools.yt_dlp.enabled);
         assert!(!manifest.tools.ffmpeg.enabled);
+    }
+
+    #[test]
+    fn builds_supported_platform_targets() {
+        assert_eq!(Target::from_parts("windows", "x86_64").unwrap().key(), "windows-x86_64");
+        assert_eq!(Target::from_parts("linux", "aarch64").unwrap().key(), "linux-aarch64");
+        assert_eq!(Target::from_parts("android", "aarch64").unwrap().key(), "android-aarch64");
+    }
+
+    #[test]
+    fn rejects_unsupported_platform_or_architecture() {
+        assert!(Target::from_parts("macos", "aarch64").is_err());
+        assert!(Target::from_parts("linux", "mips").is_err());
+        assert!(Target::from_parts("windows", "armv7").is_err());
+    }
+
+    #[test]
+    fn disabled_or_missing_tool_release_is_never_selected() {
+        let manifest = Manifest::parse_and_validate(EMPTY_MANIFEST).unwrap();
+        assert!(manifest.release(ToolKind::YtDlp, "linux-x86_64").is_none());
+        assert!(manifest.release(ToolKind::Ffmpeg, "android-aarch64").is_none());
     }
 
     #[test]
