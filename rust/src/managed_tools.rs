@@ -45,7 +45,7 @@ pub struct Release {
     pub executable_path: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ArchiveFormat {
     Zip,
