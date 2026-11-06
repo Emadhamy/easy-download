@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub manifest_version: u32,
     pub status: ManifestStatus,
@@ -137,6 +137,16 @@ mod tests {
         "ffmpeg": { "enabled": false, "releases": {} }
       }
     }"#;
+
+    #[test]
+    fn parses_repository_manifest_file() {
+        let json = include_str!("../resources/managed-tools/manifest.json");
+        let manifest = Manifest::parse_and_validate(json).expect("repository manifest must be valid");
+        assert_eq!(manifest.manifest_version, 1);
+        assert_eq!(manifest.status, ManifestStatus::Unconfigured);
+        assert!(!manifest.tools.yt_dlp.enabled);
+        assert!(!manifest.tools.ffmpeg.enabled);
+    }
 
     #[test]
     fn accepts_unconfigured_manifest() {
