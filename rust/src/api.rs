@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
+use crate::managed_tools::{Manifest, Target, ToolKind};
 use serde_json;
 
 // Controls are retained by task ID so Flutter can send pause/resume/cancel
@@ -74,6 +75,34 @@ pub fn resume_download(task_id: String) -> Result<(), String> {
 pub fn cancel_download(task_id: String) -> Result<(), String> {
     control_for(&task_id)?.cancel();
     Ok(())
+}
+
+/// Returns the canonical OS/CPU key for this application build.
+#[frb]
+pub fn get_current_platform_target() -> Result<String, String> {
+    Target::current()
+        .map(|target| target.key())
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))
+}
+
+/// Returns trusted release metadata as JSON for the current platform.
+/// None means the tool is disabled or no release is configured for this target.
+/// This function never downloads or executes a binary.
+#[frb]
+pub fn get_managed_tool_release(tool_name: String) -> Result<Option<String>, String> {
+    let kind = match tool_name.as_str() {
+        "yt-dlp" => ToolKind::YtDlp,
+        "ffmpeg" => ToolKind::Ffmpeg,
+        _ => return Err("Unknown managed tool. Use 'yt-dlp' or 'ffmpeg'.".to_string()),
+    };
+    let manifest = Manifest::parse_and_validate(include_str!("../resources/managed-tools/manifest.json"))
+        .map_err(|error| format!("Managed tools manifest is invalid: {error:?}"))?;
+    let release = manifest.release_for_current_platform(kind)
+        .map_err(|error| format!("Could not resolve current platform: {error:?}"))?;
+    release
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| format!("Could not encode release metadata: {error}"))
 }
 
 /// Validates and normalizes a direct HTTP(S) download URL.
