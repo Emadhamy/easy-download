@@ -1,19 +1,39 @@
-# Architecture (initial)
+# Architecture
 
-Easy Download is a Flutter application with a Rust core.
+Easy Download uses Flutter for presentation and Rust for direct download operations.
 
-- `lib/`: Flutter presentation layer and download-task domain model.
-- `rust/`: Rust core with HTTP(S) URL validation and a blocking direct-download function.
-- The Rust downloader streams response data to a destination file in chunks and can report received bytes and optional total bytes through a callback.
-- `rust/src/api.rs` now defines a small bridge-facing API for URL validation and direct downloads. A generated Flutter-to-Rust bridge has **not** been added yet, so the Flutter interface still cannot start this Rust downloader.
-- Pause/resume, cancellation, retries, persistent queue storage, video extraction, BitTorrent, browser integrations, and platform packaging are **not implemented yet**.
+## Current structure
 
-## Planned boundaries
+- `lib/main.dart` — Flutter dashboard, link list, local history, download controls, filtering, and progress presentation.
+- `lib/src/rust/` — generated Dart bindings produced by `flutter_rust_bridge_codegen`.
+- `rust/src/lib.rs` — HTTP(S) URL validation and chunked file-transfer implementation.
+- `rust/src/api.rs` — bridge-facing functions for starting controlled downloads, receiving progress events, and pausing, resuming, or cancelling active tasks.
+- `rust/src/managed_tools.rs` — typed parsing and validation of yt-dlp/FFmpeg release metadata. This module does not download or execute external tools.
+- `rust/resources/managed-tools/` — manifest and JSON Schema for future independently managed external tools.
 
-1. Flutter owns screens, user interaction, and platform-specific presentation.
-2. Rust owns download jobs, network transfers, and progress reporting.
-3. `flutter_rust_bridge` v2 is the selected typed bridge. Its generated bindings still need to be integrated and verified; the initial Rust API currently exposes URL validation and a basic direct-download call.
-4. Platform capabilities and storage permissions must be handled explicitly per target OS.
-5. Downloaded files should be written to a temporary destination and finalized safely when the download completes; this behavior is not implemented yet.
+## Current download flow
 
-Keep this document updated as implementation decisions are tested. Code written to the repository is not considered verified until it builds and its tests run successfully.
+1. Flutter asks the Rust API to validate a direct HTTP(S) URL.
+2. The user adds the validated link to the local download list.
+3. When started, Flutter selects a destination in the app documents directory and creates a task ID.
+4. The generated bridge calls the Rust controlled-download API.
+5. Rust streams the response to the destination and sends progress events to Flutter.
+6. Flutter updates received bytes, total size, and estimated transfer speed. Pause, resume, and cancel commands are sent to Rust using the task ID.
+7. The download list is persisted locally. Active network tasks do not survive an application restart; restored entries return to an inactive/queued state.
+
+## Important boundaries and gaps
+
+- The current direct-download implementation is not a resumable-download engine. Pause/resume controls affect an active transfer; they do not provide HTTP range-based continuation after an app restart or process loss.
+- The current destination is the app documents directory. User-selected folders, Android storage permissions, background execution, and platform-specific file access still need dedicated implementation and device testing.
+- The current UI classifies file names by extension. This is not video extraction or media conversion.
+- yt-dlp and FFmpeg release metadata is disabled and empty in the checked-in manifest. The managed-tools module validates metadata only; it does not fetch, install, update, or execute binaries.
+- BitTorrent, browser integration, floating video capture, and production packaging are not implemented.
+- The current app settings action is a placeholder notice, not a complete settings screen.
+
+## Engineering rules
+
+1. Flutter owns screens, user interaction, local presentation state, and platform-facing UI.
+2. Rust owns network transfer behavior and download control primitives.
+3. Keep generated bridge files synchronized with the Rust API by running `flutter_rust_bridge_codegen generate`.
+4. Do not enable an external binary until its official release URL, target mapping, archive layout, and independently verified SHA-256 digest are known.
+5. Never describe a feature as verified until its build and relevant tests have actually passed on the target platform.
