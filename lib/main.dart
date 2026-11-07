@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'src/utils/download_helpers.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -180,11 +181,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _pasteLinksFromClipboard() async {
     final data = await Clipboard.getData('text/plain');
     final raw = data?.text ?? '';
-    final candidates = raw.split(RegExp(r'\\s+'))
-        .map((value) => Uri.tryParse(value.trim()))
-        .whereType<Uri>()
-        .where((uri) => (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty)
-        .toSet();
+    final candidates = parseHttpLinks(raw);
     var added = 0;
     for (final uri in candidates) {
       if (_links.any((link) => link.url == uri)) continue;
@@ -281,7 +278,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
     controller.dispose();
     if (!mounted || newName == null) return;
-    final cleaned = newName.replaceAll('/', '_').replaceAll('\\\\', '_').trim();
+    final cleaned = sanitizeDownloadFileName(newName);
     if (cleaned.isEmpty || cleaned == '.' || cleaned == '..') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter a valid file name.')),
@@ -494,15 +491,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     var previousTime = DateTime.now();
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final rawName = link.fileName.replaceAll('/', '_').replaceAll('\\\\', '_');
-      final safeName = rawName.trim().isEmpty || rawName == '.' || rawName == '..'
-          ? 'download-${DateTime.now().millisecondsSinceEpoch}'
-          : rawName;
-      // Replace characters that are invalid in common desktop filesystems.
-      final portableName = safeName.replaceAll(RegExp(r'[<>:"|?*]'), '_');
-      final finalName = portableName.trim().isEmpty || portableName == '.' || portableName == '..'
-          ? 'download-${DateTime.now().millisecondsSinceEpoch}'
-          : portableName;
+      final finalName = sanitizeDownloadFileName(
+        link.fileName,
+        fallback: 'download-${DateTime.now().millisecondsSinceEpoch}',
+      );
       // Avoid overwriting an existing file with the same name.
       var destination = directory.path + '/' + finalName;
       var candidateName = finalName;
