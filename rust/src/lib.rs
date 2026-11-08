@@ -1,6 +1,6 @@
 // Core utilities and direct HTTP(S) download support for Easy Download.
 //
-// The Rust download functions are not connected to the Flutter interface yet.
+// Rust owns the HTTP transfer engine exposed to Flutter through the generated bridge.
 
 pub mod api;
 pub mod managed_tools;
@@ -193,7 +193,81 @@ pub fn download_to_path(
 
 #[cfg(test)]
 mod tests {
-    use super::{download_to_path, download_to_path_with_progress, DownloadUrl};
+    use super::{
+        download_to_path, download_to_path_with_control, download_to_path_with_progress,
+        DownloadControl, DownloadUrl,
+    };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_destination(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("easy-download-{label}-{unique}.bin"))
+    }
+
+    fn serve_body(body: &'static [u8]) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+        (format!("http://{address}/download"), handle)
+    }
+
+    #[test]
+    fn completed_download_is_renamed_to_destination_and_temp_file_is_removed() {
+        let body = b"easy-download-test-payload";
+        let (url, server) = serve_body(body);
+        let destination = test_destination("complete");
+        let temporary = destination.with_file_name(format!(
+            "{}.easy-download.part",
+            destination.file_name().unwrap().to_string_lossy()
+        ));
+
+        let received = download_to_path_with_progress(&url, &destination, |_, _| {}).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(received, body.len() as u64);
+        assert_eq!(std::fs::read(&destination).unwrap(), body);
+        assert!(!temporary.exists());
+        std::fs::remove_file(destination).unwrap();
+    }
+
+    #[test]
+    fn cancelled_download_does_not_leave_a_final_or_temporary_file() {
+        let body = b"cancel-this-download";
+        let (url, server) = serve_body(body);
+        let destination = test_destination("cancel");
+        let temporary = destination.with_file_name(format!(
+            "{}.easy-download.part",
+            destination.file_name().unwrap().to_string_lossy()
+        ));
+        let control = DownloadControl::new();
+        let cancel_control = control.clone();
+
+        let result = download_to_path_with_control(&url, &destination, control, |_, _| {
+            cancel_control.cancel();
+        });
+        server.join().unwrap();
+
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert!(!destination.exists());
+        assert!(!temporary.exists());
+    }
 
     #[test]
     fn accepts_https_url() {
