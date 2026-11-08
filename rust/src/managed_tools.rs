@@ -168,9 +168,18 @@ fn valid_target(target: &str) -> bool {
     let mut parts = target.split('-');
     let os = parts.next();
     let arch = parts.next();
-    parts.next().is_none()
-        && matches!(os, Some("windows" | "linux" | "android"))
-        && matches!(arch, Some("x86_64" | "aarch64" | "armv7"))
+
+    if parts.next().is_some() {
+        return false;
+    }
+
+    match (os, arch) {
+        // Windows ARMv7 is not a supported release target.
+        (Some("windows"), Some("x86_64" | "aarch64")) => true,
+        (Some("linux"), Some("x86_64" | "aarch64" | "armv7")) => true,
+        (Some("android"), Some("aarch64" | "armv7")) => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +210,24 @@ mod tests {
         assert_eq!(Target::from_parts("windows", "x86_64").unwrap().key(), "windows-x86_64");
         assert_eq!(Target::from_parts("linux", "aarch64").unwrap().key(), "linux-aarch64");
         assert_eq!(Target::from_parts("android", "aarch64").unwrap().key(), "android-aarch64");
+    }
+
+    #[test]
+    fn accepts_supported_os_architecture_combinations() {
+        for (os, arch) in [
+            ("windows", "x86_64"),
+            ("windows", "aarch64"),
+            ("linux", "x86_64"),
+            ("linux", "aarch64"),
+            ("linux", "armv7"),
+            ("android", "aarch64"),
+            ("android", "armv7"),
+        ] {
+            assert!(
+                Target::from_parts(os, arch).is_ok(),
+                "expected {os}-{arch} to be supported"
+            );
+        }
     }
 
     #[test]

@@ -1,35 +1,54 @@
-# Roadmap
+# Development roadmap
+
+This roadmap distinguishes code that is already present from work that still needs implementation or platform verification.
 
 ## Phase 1 — Foundation
-- [x] Create Flutter app scaffold and dark dashboard
-- [x] Create initial Rust core crate
-- [x] Add basic HTTP(S) URL validation
-- [x] Define a typed download queue model (UI/domain only)
-- [x] Write unit tests for progress and task state helpers (not yet executed)
-- [x] Add GitHub Actions workflow for Flutter and Rust checks (run status not yet confirmed)
-- [ ] Run Flutter formatting, analysis, and tests and fix any reported errors
-- [ ] Run Rust tests and confirm the toolchain setup
-- [x] Choose the bridge approach: `flutter_rust_bridge` v2 (integration still pending)
+
+- [x] Create the Flutter application and dark dashboard.
+- [x] Create the Rust core crate.
+- [x] Add HTTP(S) URL validation.
+- [x] Add the Flutter–Rust bridge and generated Dart bindings.
+- [x] Add GitHub Actions workflows for project checks.
+- [ ] Obtain a clean, current CI run after the runner-startup issue is resolved.
 
 ## Phase 2 — Direct downloads
-- [x] Write initial Rust HTTP(S) download function (not yet executed or verified)
-- [x] Add chunked response streaming and a progress callback (not yet executed or verified)
-- [ ] Generate and integrate `flutter_rust_bridge` bindings for the bridge API
-- [ ] Create and manage real download jobs and queue
-- [ ] Display progress, speed, and errors in the UI
-- [ ] Add pause, resume, cancel, and retry
-- [ ] Persist jobs across app restarts
-- [ ] Safely finalize partial downloads and handle destination conflicts
 
-## Phase 3 — Platform support
-- [ ] Verify Android storage and background execution
-- [ ] Verify Windows and Linux file destinations
-- [ ] Add platform-specific packaging and CI checks
+- [x] Implement chunked HTTP(S) downloads in Rust.
+- [x] Stream progress events through the Flutter–Rust bridge.
+- [x] Add active-task pause, resume, and cancel controls.
+- [x] Add a Flutter download list with search, sorting, and file-type filters.
+- [x] Persist download-list history locally.
+- [x] Add retry, queue actions, and basic history management in the UI.
+- [ ] Verify transfer behavior with real files and network edge cases.
+- [ ] Add HTTP range-based resume after interruption or application restart.
+- [ ] Add robust temporary-file handling and safe finalization.
+- [ ] Add user-selected save locations and destination conflict controls.
+- [ ] Add durable task-state persistence and recovery.
 
-## Phase 4 — Advanced sources
-- [ ] Research a maintainable video extraction integration
-- [ ] Add BitTorrent support
-- [ ] Add browser integration and link handoff
+## Phase 3 — Platform readiness
+
+- [ ] Verify Android storage access and background execution on real devices.
+- [ ] Verify Windows save locations, cancellation, and packaging.
+- [ ] Verify Linux save locations, cancellation, and packaging.
+- [ ] Add platform-specific build and release workflows.
+- [ ] Test large files, interrupted connections, low storage, and application shutdown.
+
+## Phase 4 — Video and audio
+
+- [ ] Integrate yt-dlp for supported video sources.
+- [ ] Add format and quality selection.
+- [ ] Integrate FFmpeg for audio extraction and MP3 conversion.
+- [ ] Build separate yt-dlp and FFmpeg settings/status sections.
+- [ ] Implement independent update checks and safe update/install flows for each tool.
+- [ ] Verify checksums, archive extraction, executable permissions, and rollback behavior.
+
+## Phase 5 — Advanced features
+
+- [ ] Add BitTorrent support.
+- [ ] Add browser link handoff and browser integration.
+- [ ] Design and implement the floating video-capture indicator.
+- [ ] Add polished platform-specific UX and accessibility improvements.
 
 ## Definition of done
-A feature is complete only after it builds and has been tested on its target platform. UI placeholders and unverified code do not count as verified functionality.
+
+A feature is complete only when its implementation is present, relevant automated checks pass, and target-platform behavior has been verified. A UI placeholder, manifest entry, or untested code path does not count as a completed feature.
