@@ -645,7 +645,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       });
       await _saveHistory();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved to app storage: $candidateName')),
+        SnackBar(content: Text('Download saved: $candidateName')),
       );
     } catch (_) {
       if (!mounted) return;
