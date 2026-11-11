@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -119,6 +120,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   final Set<_LinkDraft> _selectedLinks = {};
   bool _selectionMode = false;
   static const _historyKey = 'easy_download_history_v1';
+  static const _downloadDirectoryKey = 'easy_download_directory_v1';
+  String? _downloadDirectoryPath;
   static const int _maxConcurrentDownloads = 3;
 
   @override
@@ -130,7 +133,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _loadHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_historyKey);
-    if (raw == null || !mounted) return;
+    if (!mounted) return;
+    setState(() => _downloadDirectoryPath = prefs.getString(_downloadDirectoryKey));
+    if (raw == null) return;
     try {
       final entries = jsonDecode(raw) as List<dynamic>;
       final restored = entries
@@ -551,7 +556,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     var previousBytes = link.receivedBytes;
     var previousTime = DateTime.now();
     try {
-      final directory = await getApplicationDocumentsDirectory();
+      final directory = _downloadDirectoryPath == null
+          ? await getApplicationDocumentsDirectory()
+          : Directory(_downloadDirectoryPath!);
+      if (!await directory.exists()) {
+        throw StateError('The selected download folder no longer exists. Choose another folder in Settings.');
+      }
       String destination;
       String candidateName;
       if (link.pendingPath != null) {
@@ -903,7 +913,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         actions: [
           IconButton(
             tooltip: 'Settings',
-            onPressed: () => _showNotice(context),
+            onPressed: _showSettings,
             icon: const Icon(Icons.tune_rounded),
           ),
           const SizedBox(width: 8),
@@ -1432,10 +1442,58 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
   }
 
-  static void _showNotice(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings will be added in a later step.')),
+  Future<void> _showSettings() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Download settings'),
+        content: Text(Platform.isAndroid
+            ? 'Downloads are currently saved in Easy Download app storage on Android. Public-folder access will be added through Android Storage Access Framework in a later step.'
+            : 'Download folder:\n${_downloadDirectoryPath ?? 'App documents folder (default)'}'),
+        actions: [
+          if (!Platform.isAndroid)
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _chooseDownloadDirectory();
+              },
+              icon: const Icon(Icons.folder_open_rounded),
+              label: const Text('Choose folder'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
+  }
+
+  Future<void> _chooseDownloadDirectory() async {
+    if (Platform.isAndroid) return;
+    try {
+      final selected = await FilePicker.getDirectoryPath(
+        dialogTitle: 'Choose download folder',
+        initialDirectory: _downloadDirectoryPath,
+      );
+      if (selected == null || !mounted) return;
+      final directory = Directory(selected);
+      if (!await directory.exists()) {
+        throw StateError('The selected folder is not available.');
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_downloadDirectoryKey, selected);
+      if (!mounted) return;
+      setState(() => _downloadDirectoryPath = selected);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Download folder updated. New downloads will use this folder.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not select download folder: $error')),
+      );
+    }
   }
 }
 
