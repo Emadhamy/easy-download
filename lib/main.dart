@@ -74,11 +74,13 @@ class _LinkDraft {
   int? totalBytes;
   double speedBytesPerSecond = 0;
   String? savedPath;
+  String? pendingPath;
 
   Map<String, dynamic> toJson() => {
         'url': url.toString(),
         'fileName': fileName,
         'savedPath': savedPath,
+        'pendingPath': pendingPath,
         'isFailed': isFailed,
         'isCancelled': isCancelled,
         'receivedBytes': receivedBytes,
@@ -90,6 +92,7 @@ class _LinkDraft {
     if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) return null;
     return _LinkDraft(url: parsed, fileName: json['fileName'] as String? ?? parsed.host)
       ..savedPath = json['savedPath'] as String?
+      ..pendingPath = json['pendingPath'] as String?
       ..isFailed = json['isFailed'] as bool? ?? false
       ..isCancelled = json['isCancelled'] as bool? ?? false
       ..receivedBytes = (json['receivedBytes'] as num?)?.toInt() ?? 0
@@ -478,37 +481,60 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     if (link.isDownloading || link.savedPath != null) return;
     final taskId = 'download-${DateTime.now().microsecondsSinceEpoch}';
     link.taskId = taskId;
+    final isResuming = link.pendingPath != null;
     setState(() {
       link.isDownloading = true;
       link.isPaused = false;
       link.isCancelled = false;
       link.isFailed = false;
-      link.receivedBytes = 0;
-      link.totalBytes = null;
+      if (!isResuming) {
+        link.receivedBytes = 0;
+        link.totalBytes = null;
+      }
       link.speedBytesPerSecond = 0;
     });
-    var previousBytes = 0;
+    var previousBytes = link.receivedBytes;
     var previousTime = DateTime.now();
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final finalName = sanitizeDownloadFileName(
-        link.fileName,
-        fallback: 'download-${DateTime.now().millisecondsSinceEpoch}',
-      );
-      // Avoid overwriting an existing file with the same name.
-      var destination = directory.path + '/' + finalName;
-      var candidateName = finalName;
-      var suffix = 1;
-      while (await File(destination).exists()) {
-        final dot = finalName.lastIndexOf('.');
-        final hasExtension = dot > 0;
-        final baseName = hasExtension ? finalName.substring(0, dot) : finalName;
-        final extension = hasExtension ? finalName.substring(dot) : '';
-        candidateName = '$baseName ($suffix)$extension';
-        destination = directory.path + '/' + candidateName;
-        suffix++;
+      String destination;
+      String candidateName;
+      if (link.pendingPath != null) {
+        destination = link.pendingPath!;
+        candidateName = destination.split(Platform.pathSeparator).last;
+        if (await File(destination).exists()) {
+          if (!mounted) return;
+          setState(() {
+            link.savedPath = destination;
+            link.pendingPath = null;
+            link.isDownloading = false;
+            link.taskId = null;
+          });
+          await _saveHistory();
+          return;
+        }
+      } else {
+        final finalName = sanitizeDownloadFileName(
+          link.fileName,
+          fallback: 'download-${DateTime.now().millisecondsSinceEpoch}',
+        );
+        destination = directory.path + Platform.pathSeparator + finalName;
+        candidateName = finalName;
+        var suffix = 1;
+        while (await File(destination).exists()) {
+          final dot = finalName.lastIndexOf('.');
+          final hasExtension = dot > 0;
+          final baseName = hasExtension ? finalName.substring(0, dot) : finalName;
+          final extension = hasExtension ? finalName.substring(dot) : '';
+          candidateName = '$baseName ($suffix)$extension';
+          destination = directory.path + Platform.pathSeparator + candidateName;
+          suffix++;
+        }
+        link.pendingPath = destination;
+        await _saveHistory();
       }
-      await for (final event in rust_api.downloadFileControlled(
+
+      await for (final event in rust_api.downloadFileResumableControlled(
         taskId: taskId,
         inputUrl: link.url.toString(),
         destinationPath: destination,
@@ -525,18 +551,34 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         setState(() {
           link.receivedBytes = received;
           link.totalBytes = total;
-          link.speedBytesPerSecond = speed;
+          link.speedBytesPerSecond = speed < 0 ? 0 : speed;
         });
       }
       if (!mounted) return;
-      setState(() { link.savedPath = destination; link.isDownloading = false; link.isPaused = false; link.taskId = null; });
+      setState(() {
+        link.savedPath = destination;
+        link.pendingPath = null;
+        link.isDownloading = false;
+        link.isPaused = false;
+        link.taskId = null;
+      });
       await _saveHistory();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to app storage: $candidateName')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved to app storage: $candidateName')),
+      );
     } catch (_) {
       if (!mounted) return;
-      setState(() { link.isDownloading = false; link.isPaused = false; link.taskId = null; link.isFailed = !link.isCancelled; });
+      setState(() {
+        link.isDownloading = false;
+        link.isPaused = false;
+        link.taskId = null;
+        link.isFailed = !link.isCancelled;
+      });
+      await _saveHistory();
       if (!link.isCancelled) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download failed. Check the link and connection.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Download interrupted. Retry to continue from the saved partial file.')),
+        );
       }
     }
   }
