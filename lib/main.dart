@@ -118,6 +118,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   final Set<_LinkDraft> _selectedLinks = {};
   bool _selectionMode = false;
   static const _historyKey = 'easy_download_history_v1';
+  static const int _maxConcurrentDownloads = 3;
 
   @override
   void initState() {
@@ -477,6 +478,34 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
   }
 
+  Future<void> _enqueueDownload(_LinkDraft link) async {
+    if (link.isDownloading || link.savedPath != null || link.isFailed && link.pendingPath == null) return;
+    if (mounted) setState(() {
+      link.isFailed = false;
+      link.isCancelled = false;
+    });
+    await _saveHistory();
+    _pumpQueue();
+  }
+
+  void _pumpQueue() {
+    if (!mounted) return;
+    var active = _links.where((link) => link.isDownloading && !link.isPaused).length;
+    while (active < _maxConcurrentDownloads) {
+      final next = _links.cast<_LinkDraft?>().firstWhere(
+        (link) => link != null &&
+            !link.isDownloading &&
+            link.savedPath == null &&
+            !link.isFailed,
+        orElse: () => null,
+      );
+      if (next == null) break;
+      // _download marks the item active before its first asynchronous wait.
+      unawaited(_download(next));
+      active++;
+    }
+  }
+
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
     final taskId = 'download-${DateTime.now().microsecondsSinceEpoch}';
@@ -580,6 +609,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           const SnackBar(content: Text('Download interrupted. Retry to continue from the saved partial file.')),
         );
       }
+    } finally {
+      _pumpQueue();
     }
   }
 
@@ -589,8 +620,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         link.isDownloading && link.isPaused && link.taskId != null).toList();
     for (final link in paused) {
       if (!mounted) return;
+      if (_links.where((item) => item.isDownloading && !item.isPaused).length >=
+          _maxConcurrentDownloads) break;
       await _resumeDownload(link);
     }
+    _pumpQueue();
   }
 
   Future<void> _pauseAllActive() async {
@@ -600,20 +634,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       if (!mounted) return;
       await _pauseDownload(link);
     }
+    _pumpQueue();
   }
 
   Future<void> _downloadAllQueued() async {
-    final queued = _links.where((link) =>
-        !link.isDownloading && link.savedPath == null && !link.isFailed).toList();
-    for (final link in queued) {
-      if (!mounted) return;
-      await _download(link);
-    }
+    _pumpQueue();
   }
 
   Future<void> _retryDownload(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
-    await _download(link);
+    await _enqueueDownload(link);
   }
 
   Future<void> _pauseDownload(_LinkDraft link) async {
@@ -622,6 +652,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     try {
       await rust_api.pauseDownload(taskId: taskId);
       if (mounted) setState(() => link.isPaused = true);
+      _pumpQueue();
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -634,6 +665,15 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _resumeDownload(_LinkDraft link) async {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading || !link.isPaused) return;
+    if (_links.where((item) => item.isDownloading && !item.isPaused).length >=
+        _maxConcurrentDownloads) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All download slots are busy. Try resume again when a slot is free.')),
+        );
+      }
+      return;
+    }
     try {
       await rust_api.resumeDownload(taskId: taskId);
       if (mounted) setState(() => link.isPaused = false);
@@ -1287,7 +1327,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                       ),
                                       IconButton(
                                         tooltip: link.isFailed ? 'Retry download' : 'Download',
-                                        onPressed: () => link.isFailed ? _retryDownload(link) : _download(link),
+                                        onPressed: () => _enqueueDownload(link),
                                         icon: Icon(link.isFailed ? Icons.refresh_rounded : Icons.download_rounded, color: violet),
                                       ),
                                       IconButton(
