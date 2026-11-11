@@ -29,6 +29,17 @@ Future<void> resumeDownload({required String taskId}) =>
 Future<void> cancelDownload({required String taskId}) =>
     RustLib.instance.api.crateApiCancelDownload(taskId: taskId);
 
+/// Starts or continues a download using HTTP Range and a validated remote entity.
+Stream<String> downloadFileResumableControlled({
+  required String taskId,
+  required String inputUrl,
+  required String destinationPath,
+}) => RustLib.instance.api.crateApiDownloadFileResumableControlled(
+  taskId: taskId,
+  inputUrl: inputUrl,
+  destinationPath: destinationPath,
+);
+
 /// Returns the canonical OS/CPU key for this application build.
 Future<String> getCurrentPlatformTarget() =>
     RustLib.instance.api.crateApiGetCurrentPlatformTarget();
