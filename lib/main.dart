@@ -525,8 +525,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     final firstIndex = _links.indexOf(queued[current]);
     final secondIndex = _links.indexOf(queued[target]);
     setState(() {
-      final item = _links.removeAt(firstIndex);
-      _links.insert(secondIndex, item);
+      final item = _links[firstIndex];
+      _links[firstIndex] = _links[secondIndex];
+      _links[secondIndex] = item;
     });
     await _saveHistory();
   }
@@ -1376,20 +1377,24 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                         onPressed: () => _enqueueDownload(link),
                                         icon: Icon(link.isFailed ? Icons.refresh_rounded : Icons.download_rounded, color: violet),
                                       ),
-                                      IconButton(
-                                        tooltip: 'Move up in queue',
-                                        onPressed: _queuePosition(link) <= 1
-                                            ? null
-                                            : () => _moveQueuedDownload(link, -1),
-                                        icon: const Icon(Icons.keyboard_arrow_up_rounded),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Move down in queue',
-                                        onPressed: _queuePosition(link) >= queuedCount
-                                            ? null
-                                            : () => _moveQueuedDownload(link, 1),
-                                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                                      ),
+                                      if (!link.isFailed)
+                                        PopupMenuButton<int>(
+                                          tooltip: 'Change queue position',
+                                          onSelected: (direction) =>
+                                              _moveQueuedDownload(link, direction),
+                                          itemBuilder: (context) => [
+                                            PopupMenuItem<int>(
+                                              value: -1,
+                                              enabled: _queuePosition(link) > 1,
+                                              child: const Text('Move up in queue'),
+                                            ),
+                                            PopupMenuItem<int>(
+                                              value: 1,
+                                              enabled: _queuePosition(link) < queuedCount,
+                                              child: const Text('Move down in queue'),
+                                            ),
+                                          ],
+                                        ),
                                       IconButton(
                                         tooltip: 'Remove from list',
                                         onPressed: () => _removeLink(link),
