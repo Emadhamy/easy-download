@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -641,11 +642,6 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     _pumpQueue();
   }
 
-  Future<void> _retryDownload(_LinkDraft link) async {
-    if (link.isDownloading || link.savedPath != null) return;
-    await _enqueueDownload(link);
-  }
-
   Future<void> _pauseDownload(_LinkDraft link) async {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading || link.isPaused) return;
@@ -835,7 +831,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     const violet = Color(0xFF8B5CF6);
     const muted = Color(0xFF9A9AAF);
     const panel = Color(0xFF151525);
-    final queuedCount = _links.where((link) => link.savedPath == null).length;
+    final queuedCount = _links.where((link) =>
+        !link.isDownloading && link.savedPath == null && !link.isFailed).length;
+    final activeCount = _links.where((link) =>
+        link.isDownloading && !link.isPaused).length;
     final downloadedCount = _links.where((link) => link.savedPath != null).length;
     final visibleLinks = _links.where((link) {
       final matchesFilter = _filter == 'All' ||
