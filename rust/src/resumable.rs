@@ -306,7 +306,7 @@ mod tests {
             let (mut first, _) = listener.accept().unwrap();
             let _ = read_request(&mut first);
             write!(first,
-                "HTTP/1.1 200 OK\\r\\nContent-Length: {}\\r\\nETag: \\"v1\\"\\r\\nConnection: close\\r\\n\\r\\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n",
                 server_body.len()).unwrap();
             first.write_all(&server_body[..split]).unwrap();
             drop(first);
@@ -316,7 +316,7 @@ mod tests {
             assert!(request.to_ascii_lowercase().contains(&format!("range: bytes={split}-")));
             // Some servers ignore Range and return the complete representation.
             write!(second,
-                "HTTP/1.1 200 OK\\r\\nContent-Length: {}\\r\\nETag: \\"v1\\"\\r\\nConnection: close\\r\\n\\r\\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n",
                 server_body.len()).unwrap();
             second.write_all(&server_body).unwrap();
         });
