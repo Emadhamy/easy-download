@@ -294,4 +294,53 @@ mod tests {
         assert!(!std::path::PathBuf::from(format!("{}.easy-download.meta.json", target.display())).exists());
         std::fs::remove_file(target).unwrap();
     }
+
+    #[test]
+    fn restarts_cleanly_when_server_ignores_range_request() {
+        let body = b"fresh-complete-download-payload";
+        let split = 8;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_body = body.to_vec();
+        let server = thread::spawn(move || {
+            let (mut first, _) = listener.accept().unwrap();
+            let _ = read_request(&mut first);
+            write!(first,
+                "HTTP/1.1 200 OK\\r\\nContent-Length: {}\\r\\nETag: \\"v1\\"\\r\\nConnection: close\\r\\n\\r\\n",
+                server_body.len()).unwrap();
+            first.write_all(&server_body[..split]).unwrap();
+            drop(first);
+
+            let (mut second, _) = listener.accept().unwrap();
+            let request = read_request(&mut second);
+            assert!(request.to_ascii_lowercase().contains(&format!("range: bytes={split}-")));
+            // Some servers ignore Range and return the complete representation.
+            write!(second,
+                "HTTP/1.1 200 OK\\r\\nContent-Length: {}\\r\\nETag: \\"v1\\"\\r\\nConnection: close\\r\\n\\r\\n",
+                server_body.len()).unwrap();
+            second.write_all(&server_body).unwrap();
+        });
+
+        let url = format!("http://{address}/file.bin");
+        let target = destination();
+        let first = download_to_path_resumable_with_control(
+            &url, &target, DownloadControl::new(), |_, _| {},
+        );
+        assert!(first.is_err(), "the deliberately interrupted first transfer must fail");
+
+        let partial = std::path::PathBuf::from(format!("{}.easy-download.part", target.display()));
+        assert_eq!(std::fs::metadata(&partial).unwrap().len(), split as u64);
+
+        let received = download_to_path_resumable_with_control(
+            &url, &target, DownloadControl::new(), |_, _| {},
+        ).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(received, body.len() as u64);
+        assert_eq!(std::fs::read(&target).unwrap(), body);
+        assert!(!partial.exists());
+        assert!(!std::path::PathBuf::from(format!("{}.easy-download.meta.json", target.display())).exists());
+        std::fs::remove_file(target).unwrap();
+    }
+
 }
