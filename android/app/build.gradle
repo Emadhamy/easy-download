@@ -9,10 +9,6 @@ android {
     compileSdk flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 
-    dependencies {
-        implementation "androidx.documentfile:documentfile:1.0.1"
-    }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -27,6 +23,10 @@ android {
         versionName flutter.versionName
     }
     sourceSets { main { jniLibs.srcDirs = ["src/main/jniLibs"] } }
+}
+
+dependencies {
+    implementation "androidx.documentfile:documentfile:1.0.1"
 }
 
 flutter { source "../.." }
