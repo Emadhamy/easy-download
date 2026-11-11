@@ -93,6 +93,49 @@ jobs:
           path: build/android/jniLibs/
           if-no-files-found: error
 
+
+  android-apk-build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    needs: android-rust-build
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Rust for bridge generation
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Flutter Rust Bridge code generator
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
+      - name: Generate Flutter-Rust bridge
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Download Android Rust native library
+        uses: actions/download-artifact@v4
+        with:
+          name: easy-download-android-arm64
+          path: android/app/src/main/jniLibs
+
+      - name: Build Android ARM64 debug APK
+        run: flutter build apk --debug --target-platform android-arm64
+
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-download-android-debug-apk
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
+          if-no-files-found: error
+
   rust-check:
     name: Rust tests and bridge generation
     runs-on: ubuntu-latest
