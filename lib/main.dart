@@ -976,15 +976,23 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               children: [
                 Expanded(
                   child: _StatCard(
-                    label: 'Queued links',
-                    value: '$queuedCount',
-                    icon: Icons.link_rounded,
+                    label: 'Active',
+                    value: '$activeCount / $_maxConcurrentDownloads',
+                    icon: Icons.downloading_rounded,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _StatCard(
-                    label: 'Downloaded',
+                    label: 'In queue',
+                    value: '$queuedCount',
+                    icon: Icons.queue_rounded,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _StatCard(
+                    label: 'Completed',
                     value: '$downloadedCount',
                     icon: Icons.check_circle_outline_rounded,
                   ),
