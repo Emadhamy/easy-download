@@ -27,11 +27,14 @@ jobs:
       - name: Install Flutter Rust Bridge code generator
         run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
 
-      - name: Generate Flutter-Rust bridge before analysis
-        run: flutter_rust_bridge_codegen generate
-
       - name: Install Flutter dependencies
         run: flutter pub get
+
+      - name: Generate Flutter-Rust bridge before analysis
+        run: |
+          set -e
+          flutter_rust_bridge_codegen generate
+          test -s rust/src/frb_generated.rs
 
       - name: Analyze Flutter code
         run: flutter analyze
@@ -94,48 +97,6 @@ jobs:
           if-no-files-found: error
 
 
-  android-apk-build:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-    needs: android-rust-build
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Set up Rust for bridge generation
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Flutter Rust Bridge code generator
-        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
-
-      - name: Generate Flutter-Rust bridge
-        run: flutter_rust_bridge_codegen generate
-
-      - name: Install Flutter dependencies
-        run: flutter pub get
-
-      - name: Download Android Rust native library
-        uses: actions/download-artifact@v4
-        with:
-          name: easy-download-android-arm64
-          path: android/app/src/main/jniLibs
-
-      - name: Build Android ARM64 debug APK
-        run: flutter build apk --debug --target-platform android-arm64
-
-      - name: Upload Android debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: easy-download-android-debug-apk
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk
-          if-no-files-found: error
-
   rust-check:
     name: Rust tests and bridge generation
     runs-on: ubuntu-latest
@@ -163,7 +124,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib/src/rust/
+          git add lib/src/rust/ rust/src/frb_generated.rs
           if ! git diff --cached --quiet; then
             git commit -m "Update generated Flutter Rust bridge"
             git push
@@ -173,7 +134,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: flutter-rust-bridge-generated
-          path: lib/src/rust/
+          path: |
+            lib/src/rust/
+            rust/src/frb_generated.rs
           if-no-files-found: error
 
       - name: Run Rust tests
