@@ -507,6 +507,30 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     }
   }
 
+  int _queuePosition(_LinkDraft link) {
+    final queued = _links.where((item) =>
+        !item.isDownloading && item.savedPath == null && !item.isFailed).toList();
+    final index = queued.indexOf(link);
+    return index < 0 ? 0 : index + 1;
+  }
+
+  Future<void> _moveQueuedDownload(_LinkDraft link, int direction) async {
+    if (link.isDownloading || link.savedPath != null || link.isFailed) return;
+    final queued = _links.where((item) =>
+        !item.isDownloading && item.savedPath == null && !item.isFailed).toList();
+    final current = queued.indexOf(link);
+    final target = current + direction;
+    if (current < 0 || target < 0 || target >= queued.length) return;
+
+    final firstIndex = _links.indexOf(queued[current]);
+    final secondIndex = _links.indexOf(queued[target]);
+    setState(() {
+      final item = _links.removeAt(firstIndex);
+      _links.insert(secondIndex, item);
+    });
+    await _saveHistory();
+  }
+
   Future<void> _download(_LinkDraft link) async {
     if (link.isDownloading || link.savedPath != null) return;
     final taskId = 'download-${DateTime.now().microsecondsSinceEpoch}';
@@ -1277,11 +1301,26 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                         ),
                                       ],
                                     )
-                                  : Text(
-                                      link.url.toString(),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(color: muted, fontSize: 12),
+                                  : Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (!link.isFailed && link.savedPath == null)
+                                          Text(
+                                            'Queue position: #${_queuePosition(link)}',
+                                            style: const TextStyle(
+                                              color: Color(0xFFD4C5FF),
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        Text(
+                                          link.url.toString(),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(color: muted, fontSize: 12),
+                                        ),
+                                      ],
                                     ),
                         ),
                         trailing: link.savedPath != null
@@ -1336,6 +1375,20 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                         tooltip: link.isFailed ? 'Retry download' : 'Download',
                                         onPressed: () => _enqueueDownload(link),
                                         icon: Icon(link.isFailed ? Icons.refresh_rounded : Icons.download_rounded, color: violet),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Move up in queue',
+                                        onPressed: _queuePosition(link) <= 1
+                                            ? null
+                                            : () => _moveQueuedDownload(link, -1),
+                                        icon: const Icon(Icons.keyboard_arrow_up_rounded),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Move down in queue',
+                                        onPressed: _queuePosition(link) >= queuedCount
+                                            ? null
+                                            : () => _moveQueuedDownload(link, 1),
+                                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
                                       ),
                                       IconButton(
                                         tooltip: 'Remove from list',
