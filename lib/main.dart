@@ -121,7 +121,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   bool _selectionMode = false;
   static const _historyKey = 'easy_download_history_v1';
   static const _downloadDirectoryKey = 'easy_download_directory_v1';
+  static const _androidDirectoryKey = 'easy_download_android_tree_uri_v1';
+  static const _storageChannel = MethodChannel('com.easydownload/storage');
   String? _downloadDirectoryPath;
+  String? _androidDownloadTreeUri;
   static const int _maxConcurrentDownloads = 3;
 
   @override
@@ -134,7 +137,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_historyKey);
     if (!mounted) return;
-    setState(() => _downloadDirectoryPath = prefs.getString(_downloadDirectoryKey));
+    setState(() {
+      _downloadDirectoryPath = prefs.getString(_downloadDirectoryKey);
+      _androidDownloadTreeUri = prefs.getString(_androidDirectoryKey);
+    });
     if (raw == null) return;
     try {
       final entries = jsonDecode(raw) as List<dynamic>;
@@ -556,9 +562,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     var previousBytes = link.receivedBytes;
     var previousTime = DateTime.now();
     try {
-      final directory = _downloadDirectoryPath == null
-          ? await getApplicationDocumentsDirectory()
-          : Directory(_downloadDirectoryPath!);
+      final directory = !Platform.isAndroid && _downloadDirectoryPath != null
+          ? Directory(_downloadDirectoryPath!)
+          : await getApplicationDocumentsDirectory();
       if (!await directory.exists()) {
         throw StateError('The selected download folder no longer exists. Choose another folder in Settings.');
       }
@@ -568,9 +574,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         destination = link.pendingPath!;
         candidateName = destination.split(Platform.pathSeparator).last;
         if (await File(destination).exists()) {
+          var completedLocation = destination;
+          if (Platform.isAndroid && _androidDownloadTreeUri != null) {
+            completedLocation = await _copyToAndroidDownloadDirectory(destination, candidateName);
+            try { await File(destination).delete(); } catch (_) {}
+          }
           if (!mounted) return;
           setState(() {
-            link.savedPath = destination;
+            link.savedPath = completedLocation;
             link.pendingPath = null;
             link.isDownloading = false;
             link.taskId = null;
@@ -619,9 +630,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           link.speedBytesPerSecond = speed < 0 ? 0 : speed;
         });
       }
+      var completedLocation = destination;
+      if (Platform.isAndroid && _androidDownloadTreeUri != null) {
+        completedLocation = await _copyToAndroidDownloadDirectory(destination, candidateName);
+        try { await File(destination).delete(); } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
-        link.savedPath = destination;
+        link.savedPath = completedLocation;
         link.pendingPath = null;
         link.isDownloading = false;
         link.isPaused = false;
@@ -1448,18 +1464,19 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Download settings'),
         content: Text(Platform.isAndroid
-            ? 'Downloads are currently saved in Easy Download app storage on Android. Public-folder access will be added through Android Storage Access Framework in a later step.'
+            ? (_androidDownloadTreeUri == null
+                ? 'Downloads are saved in Easy Download app storage. Choose a folder to save completed downloads there. Downloads are staged privately while in progress, then copied to your chosen folder.'
+                : 'A folder has been selected for completed downloads. In-progress files remain in private app storage so pause and resume continue to work.')
             : 'Download folder:\n${_downloadDirectoryPath ?? 'App documents folder (default)'}'),
         actions: [
-          if (!Platform.isAndroid)
-            TextButton.icon(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                _chooseDownloadDirectory();
-              },
-              icon: const Icon(Icons.folder_open_rounded),
-              label: const Text('Choose folder'),
-            ),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              _chooseDownloadDirectory();
+            },
+            icon: const Icon(Icons.folder_open_rounded),
+            label: const Text('Choose folder'),
+          ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Close'),
@@ -1469,9 +1486,33 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     );
   }
 
+  Future<String> _copyToAndroidDownloadDirectory(String sourcePath, String fileName) async {
+    final treeUri = _androidDownloadTreeUri;
+    if (treeUri == null) return sourcePath;
+    final savedUri = await _storageChannel.invokeMethod<String>(
+      'copyFileToDownloadDirectory',
+      {'treeUri': treeUri, 'sourcePath': sourcePath, 'fileName': fileName},
+    );
+    if (savedUri == null || savedUri.isEmpty) {
+      throw StateError('Android did not return the saved file location.');
+    }
+    return savedUri;
+  }
+
   Future<void> _chooseDownloadDirectory() async {
-    if (Platform.isAndroid) return;
     try {
+      if (Platform.isAndroid) {
+        final selectedUri = await _storageChannel.invokeMethod<String>('pickDownloadDirectory');
+        if (selectedUri == null || !mounted) return;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_androidDirectoryKey, selectedUri);
+        if (!mounted) return;
+        setState(() => _androidDownloadTreeUri = selectedUri);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Android download folder updated.')),
+        );
+        return;
+      }
       final selected = await FilePicker.getDirectoryPath(
         dialogTitle: 'Choose download folder',
         initialDirectory: _downloadDirectoryPath,
