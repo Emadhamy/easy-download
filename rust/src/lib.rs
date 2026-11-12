@@ -80,7 +80,10 @@ pub fn download_to_path_with_control<F>(input_url: &str, destination: impl AsRef
 where F: FnMut(u64, Option<u64>) {
     let url = DownloadUrl::parse(input_url)?;
     let destination = destination.as_ref();
-    let client = Client::builder().build().map_err(|error| format!("Could not create HTTP client: {error}"))?;
+    let client_builder = Client::builder();
+    #[cfg(test)]
+    let client_builder = client_builder.no_proxy();
+    let client = client_builder.build().map_err(|error| format!("Could not create HTTP client: {error}"))?;
     let mut response = client.get(url.as_str()).send().and_then(|response| response.error_for_status()).map_err(|error| format!("Download request failed: {error}"))?;
     let mut temporary_name = destination.as_os_str().to_os_string();
     temporary_name.push(".easy-download.part");
@@ -134,7 +137,7 @@ mod tests {
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 1024]; let _ = stream.read(&mut request);
-            write!(stream, "HTTP/1.1 200 OK\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n", body.len()).unwrap();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
             stream.write_all(body).unwrap();
         });
         (format!("http://{address}/download"), handle)
