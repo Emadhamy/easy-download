@@ -50,6 +50,12 @@ Future<String> getCurrentPlatformTarget() =>
 Future<String?> getManagedToolRelease({required String toolName}) =>
     RustLib.instance.api.crateApiGetManagedToolRelease(toolName: toolName);
 
+/// Checks the latest stable yt-dlp release through the official GitHub API.
+/// The returned candidate includes the official asset URL and published SHA-256.
+/// This operation never downloads or installs the executable.
+Future<String> ytDlpCheckLatestRelease() =>
+    RustLib.instance.api.crateApiYtDlpCheckLatestRelease();
+
 /// Returns the version reported by the verified yt-dlp executable path.
 Future<String> ytDlpGetVersion({required String executablePath}) => RustLib
     .instance
