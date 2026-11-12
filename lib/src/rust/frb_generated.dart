@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -838770416;
+  int get rustContentHash => -490456222;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -120,6 +120,10 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateApiYtDlpInspectSource({
     required String executablePath,
     required String sourceUrl,
+  });
+
+  Stream<String> crateApiYtDlpInstallLatestRelease({
+    required String installRoot,
   });
 }
 
@@ -558,6 +562,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     debugName: "yt_dlp_inspect_source",
     argNames: ["executablePath", "sourceUrl"],
   );
+
+  @override
+  Stream<String> crateApiYtDlpInstallLatestRelease({
+    required String installRoot,
+  }) {
+    final sink = RustStreamSink<String>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_String(installRoot, serializer);
+            sse_encode_StreamSink_String_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 14,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_String,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiYtDlpInstallLatestReleaseConstMeta,
+          argValues: [installRoot, sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiYtDlpInstallLatestReleaseConstMeta =>
+      const TaskConstMeta(
+        debugName: "yt_dlp_install_latest_release",
+        argNames: ["installRoot", "sink"],
+      );
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {

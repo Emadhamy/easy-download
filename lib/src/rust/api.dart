@@ -56,6 +56,13 @@ Future<String?> getManagedToolRelease({required String toolName}) =>
 Future<String> ytDlpCheckLatestRelease() =>
     RustLib.instance.api.crateApiYtDlpCheckLatestRelease();
 
+/// Downloads and installs the latest official yt-dlp release for this platform.
+/// The installer verifies the published SHA-256 and executable version before activation.
+Stream<String> ytDlpInstallLatestRelease({required String installRoot}) =>
+    RustLib.instance.api.crateApiYtDlpInstallLatestRelease(
+      installRoot: installRoot,
+    );
+
 /// Returns the version reported by the verified yt-dlp executable path.
 Future<String> ytDlpGetVersion({required String executablePath}) => RustLib
     .instance
