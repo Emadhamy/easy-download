@@ -87,12 +87,12 @@ Future<String> ytDlpInspectFormats({
   sourceUrl: sourceUrl,
 );
 
-/// Resolves a selected yt-dlp format to a single HTTP(S) media URL.
-Future<String> ytDlpResolveFormatUrl({
+/// Resolves a selected yt-dlp format to a URL and required HTTP headers.
+Future<String> ytDlpResolveFormatRequest({
   required String executablePath,
   required String sourceUrl,
   required String formatId,
-}) => RustLib.instance.api.crateApiYtDlpResolveFormatUrl(
+}) => RustLib.instance.api.crateApiYtDlpResolveFormatRequest(
   executablePath: executablePath,
   sourceUrl: sourceUrl,
   formatId: formatId,
