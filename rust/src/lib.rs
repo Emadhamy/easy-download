@@ -3,6 +3,7 @@
 // Rust owns the HTTP transfer engine exposed to Flutter through the generated bridge.
 
 pub mod api;
+pub mod ffmpeg;
 pub mod managed_tools;
 pub mod resumable;
 pub mod yt_dlp;
