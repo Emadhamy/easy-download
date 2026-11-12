@@ -32,7 +32,7 @@ The updater must fail closed on API errors, rate limits, unsupported targets, mi
 
 ## Current implementation boundary
 
-The repository currently contains the typed release-manifest foundation, staged official desktop yt-dlp metadata, platform target resolution, and a yt-dlp process adapter. It does not yet contain the complete official-release polling, downloading, checksum verification, safe installation, rollback, update history, periodic scheduler, or dedicated Flutter manager UI. The manifest deliberately keeps tool installation disabled until that lifecycle is implemented and tested.
+The repository currently contains the typed release-manifest foundation, staged official desktop yt-dlp metadata, platform target resolution, and a yt-dlp process adapter. It now contains an official GitHub latest-stable-release lookup that selects a supported desktop asset and requires GitHub's published SHA-256 digest. It does not yet contain the complete asset download, checksum verification of downloaded bytes, safe installation, rollback, persisted update history, periodic scheduler, or dedicated Flutter manager UI. The manifest deliberately keeps tool installation disabled until that lifecycle is implemented and tested.
 
 ## Engineering rules
 
