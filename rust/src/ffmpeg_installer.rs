@@ -59,7 +59,7 @@ fn safe_version_component(version: &str) -> Result<String, String> {
             previous_dash = false;
         }
     }
-    let result = result.trim_matches(['.', '-', '_']).to_string();
+    let result = result.trim_matches(&['.', '-', '_'][..]).to_string();
     if result.is_empty() || result == "." || result == ".." {
         return Err("The FFmpeg release version cannot be used as a directory name".to_string());
     }
@@ -85,7 +85,12 @@ fn validate_candidate(candidate: &LatestFfmpegRelease, target: &str) -> Result<&
     {
         return Err("The FFmpeg archive is not the exact selected BtbN release asset".to_string());
     }
-    if !candidate.release_page.starts_with("https://github.com/BtbN/FFmpeg-Builds/releases/") {
+    let release_page = reqwest::Url::parse(&candidate.release_page)
+        .map_err(|_| "The FFmpeg release page URL is invalid".to_string())?;
+    if release_page.scheme() != "https"
+        || release_page.host_str() != Some("github.com")
+        || !release_page.path().starts_with("/BtbN/FFmpeg-Builds/releases/")
+    {
         return Err("The FFmpeg release page is not an official BtbN GitHub page".to_string());
     }
     let path_format = if asset.ends_with(".zip") { "zip" } else { "tar.xz" };
@@ -381,8 +386,8 @@ fn hash_file(path: &Path) -> Result<String, String> {
 fn read_pointer(path: &Path) -> Result<ActiveFfmpeg, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect FFmpeg active pointer: {error}"))?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("FFmpeg active pointer must be a regular file".to_string());
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 16 * 1024 {
+        return Err("FFmpeg active pointer must be a small regular file".to_string());
     }
     serde_json::from_slice(&fs::read(path)
         .map_err(|error| format!("Could not read FFmpeg active pointer: {error}"))?)
@@ -394,7 +399,18 @@ fn resolve_installed(root: &Path, active: &ActiveFfmpeg) -> Result<PathBuf, Stri
     if !is_safe_relative(relative) {
         return Err("FFmpeg active executable path is unsafe".to_string());
     }
-    let executable = root.join(relative);
+    let components: Vec<_> = relative.components().collect();
+    if components.len() != 3
+        || components[0].as_os_str() != "versions"
+        || !matches!(components[2].as_os_str().to_str(), Some("ffmpeg" | "ffmpeg.exe"))
+    {
+        return Err("FFmpeg active executable path does not match the managed layout".to_string());
+    }
+    let versions_dir = root.join("versions");
+    reject_symlink_directory(&versions_dir, "FFmpeg versions")?;
+    let version_dir = versions_dir.join(components[1].as_os_str());
+    reject_symlink_directory(&version_dir, "active FFmpeg version")?;
+    let executable = version_dir.join(components[2].as_os_str());
     let metadata = fs::symlink_metadata(&executable)
         .map_err(|error| format!("Could not access installed FFmpeg executable: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
