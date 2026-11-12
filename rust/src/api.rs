@@ -113,6 +113,42 @@ pub fn download_file_resumable_controlled(
     result
 }
 
+/// Starts a resumable download with validated per-request HTTP headers.
+/// Headers are supplied as a JSON object and are not stored in resume metadata.
+#[frb]
+pub fn download_file_resumable_controlled_with_headers(
+    task_id: String,
+    input_url: String,
+    headers_json: String,
+    destination_path: String,
+    sink: StreamSink<String>,
+) -> Result<u64, String> {
+    let control = DownloadControl::new();
+    {
+        let mut registry = controls().lock().map_err(|_| "Download control registry lock poisoned".to_string())?;
+        if registry.contains_key(&task_id) {
+            return Err("A download with this task ID is already registered".to_string());
+        }
+        registry.insert(task_id.clone(), control.clone());
+    }
+
+    let result = crate::resumable::download_to_path_resumable_with_control_and_headers(
+        &input_url, &headers_json, destination_path, control, |received, total| {
+            let event = serde_json::json!({
+                "taskId": task_id,
+                "received": received,
+                "total": total,
+            });
+            let _ = sink.add(event.to_string());
+        },
+    );
+
+    if let Ok(mut registry) = controls().lock() {
+        registry.remove(&task_id);
+    }
+    result
+}
+
 /// Returns the canonical OS/CPU key for this application build.
 #[frb]
 pub fn get_current_platform_target() -> Result<String, String> {
