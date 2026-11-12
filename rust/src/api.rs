@@ -10,6 +10,7 @@ use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
 use crate::managed_tools::{Manifest, Target, ToolKind};
 use crate::yt_dlp_updates::fetch_latest_release;
+use crate::yt_dlp_installer::install_release;
 use serde_json;
 
 // Controls are retained by task ID so Flutter can send pause/resume/cancel
@@ -151,6 +152,40 @@ pub fn yt_dlp_check_latest_release() -> Result<String, String> {
     let release = fetch_latest_release(&target.key())?;
     serde_json::to_string(&release)
         .map_err(|error| format!("Could not encode latest yt-dlp release: {error}"))
+}
+
+/// Downloads and installs the latest official yt-dlp release for this platform.
+/// The installer verifies the published SHA-256 and executable version before activation.
+#[frb]
+pub fn yt_dlp_install_latest_release(
+    install_root: String,
+    sink: StreamSink<String>,
+) -> Result<String, String> {
+    let target = Target::current()
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))?;
+    let target_key = target.key();
+    let candidate = fetch_latest_release(&target_key)?;
+    let installed = install_release(
+        &candidate,
+        &target_key,
+        install_root,
+        |received, total| {
+            let event = serde_json::json!({
+                "phase": "downloading",
+                "received": received,
+                "total": total,
+            });
+            let _ = sink.add(event.to_string());
+        },
+    )?;
+    let event = serde_json::json!({
+        "phase": "installed",
+        "version": installed.version,
+        "executablePath": installed.executable_path,
+    });
+    let _ = sink.add(event.to_string());
+    serde_json::to_string(&installed)
+        .map_err(|error| format!("Could not encode installed yt-dlp metadata: {error}"))
 }
 
 /// Returns the version reported by the verified yt-dlp executable path.
