@@ -25,24 +25,19 @@ This roadmap distinguishes code that is already present from work that still nee
 - [ ] Add user-selected save locations and destination conflict controls.
 - [ ] Add durable task-state persistence and recovery.
 
-## Phase 3 — Platform readiness
+## Phase 3 — Video and audio
 
-- [ ] Verify Android storage access and background execution on real devices.
-- [ ] Verify Windows save locations, cancellation, and packaging.
-- [ ] Verify Linux save locations, cancellation, and packaging.
-- [ ] Add platform-specific build and release workflows.
-- [ ] Test large files, interrupted connections, low storage, and application shutdown.
-
-## Phase 4 — Video and audio
-
-- [ ] Integrate yt-dlp for supported video sources.
+- [ ] Complete yt-dlp integration for supported video sources using a verified, installed executable.
+- [x] Add the initial Rust yt-dlp adapter for version probing and single-source HTTP(S) metadata inspection.
+- [ ] Connect source inspection to the Flutter workflow and download queue.
 - [ ] Add format and quality selection.
 - [ ] Integrate FFmpeg for audio extraction and MP3 conversion.
 - [ ] Build separate yt-dlp and FFmpeg settings/status sections.
 - [ ] Implement independent update checks and safe update/install flows for each tool.
 - [ ] Verify checksums, archive extraction, executable permissions, and rollback behavior.
+- [ ] Validate compatible yt-dlp runtime packages on Windows, Linux, and Android separately.
 
-## Phase 5 — Advanced features
+## Phase 4 — Advanced features
 
 - [ ] Add BitTorrent support.
 - [ ] Add browser link handoff and browser integration.
@@ -52,3 +47,12 @@ This roadmap distinguishes code that is already present from work that still nee
 ## Definition of done
 
 A feature is complete only when its implementation is present, relevant automated checks pass, and target-platform behavior has been verified. A UI placeholder, manifest entry, or untested code path does not count as a completed feature.
+
+
+## Cross-platform release verification
+
+- [ ] Verify Android storage access and background execution on real devices.
+- [ ] Verify Windows save locations, cancellation, and packaging.
+- [ ] Verify Linux save locations, cancellation, and packaging.
+- [ ] Add platform-specific build and release workflows.
+- [ ] Test large files, interrupted connections, low storage, and application shutdown.
