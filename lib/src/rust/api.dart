@@ -186,3 +186,8 @@ Stream<String> ffmpegConvertToMp3Controlled({
   outputPath: outputPath,
   bitrate: bitrate,
 );
+
+/// Checks the latest BtbN FFmpeg release and verifies its published checksum entry.
+/// This discovery step does not download or execute the FFmpeg archive.
+Future<String> ffmpegCheckLatestRelease() =>
+    RustLib.instance.api.crateApiFfmpegCheckLatestRelease();
