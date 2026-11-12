@@ -978,18 +978,25 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       }
 
       var transferUrl = link.url.toString();
+      var transferHeadersJson = '{}';
       if (link.ytDlpFormatId != null) {
         final executable = await _installedYtDlpExecutable();
-        transferUrl = await rust_api.ytDlpResolveFormatUrl(
+        final resolvedRequest = jsonDecode(await rust_api.ytDlpResolveFormatRequest(
           executablePath: executable,
           sourceUrl: link.url.toString(),
           formatId: link.ytDlpFormatId!,
-        );
+        )) as Map<String, dynamic>;
+        transferUrl = resolvedRequest['url'] as String;
+        final headers = resolvedRequest['headers'];
+        if (headers is Map<String, dynamic>) {
+          transferHeadersJson = jsonEncode(headers);
+        }
       }
 
-      await for (final event in rust_api.downloadFileResumableControlled(
+      await for (final event in rust_api.downloadFileResumableControlledWithHeaders(
         taskId: taskId,
         inputUrl: transferUrl,
+        headersJson: transferHeadersJson,
         destinationPath: destination,
       )) {
         final progress = jsonDecode(event) as Map<String, dynamic>;
