@@ -544,6 +544,30 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn atomically_replaces_existing_pointer_file() {
+        use super::replace_file_atomically;
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-atomic-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let source = directory.join("active.new");
+        let destination = directory.join("active.json");
+        fs::write(&source, b"new-active").unwrap();
+        fs::write(&destination, b"old-active").unwrap();
+
+        replace_file_atomically(&source, &destination).unwrap();
+
+        assert_eq!(fs::read(&destination).unwrap(), b"new-active");
+        assert!(!source.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn selects_static_gpl_archives_for_supported_desktop_targets() {
         assert_eq!(expected_asset("windows-x86_64").unwrap().0, "ffmpeg-master-latest-win64-gpl.zip");
         assert_eq!(expected_asset("windows-aarch64").unwrap().0, "ffmpeg-master-latest-winarm64-gpl.zip");
