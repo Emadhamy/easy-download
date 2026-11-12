@@ -1180,6 +1180,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     bool inspecting = false;
     List<Map<String, dynamic>> formats = [];
     Map<String, dynamic>? sourceInfo;
+    String? inspectedSourceUrl;
     String? selectedFormatId;
 
     final selection = await showDialog<_VideoFormatSelection>(
@@ -1216,6 +1217,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               if (!dialogContext.mounted) return;
               setDialogState(() {
                 sourceInfo = decoded;
+                inspectedSourceUrl = normalized;
                 formats = available;
                 selectedFormatId = available.first['formatId'] as String?;
               });
@@ -1257,6 +1259,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                         hintText: 'https://...',
                         border: OutlineInputBorder(),
                       ),
+                      onChanged: (_) {
+                        if (sourceInfo != null) {
+                          setDialogState(() {
+                            sourceInfo = null;
+                            inspectedSourceUrl = null;
+                            formats = [];
+                            selectedFormatId = null;
+                          });
+                        }
+                      },
                       onSubmitted: (_) => inspectSource(),
                     ),
                     const SizedBox(height: 12),
@@ -1314,7 +1326,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                             .toLowerCase()
                             .replaceAll(RegExp(r'[^a-z0-9]'), '');
                         Navigator.of(dialogContext).pop(_VideoFormatSelection(
-                          sourceUrl: Uri.parse(controller.text.trim()),
+                          sourceUrl: Uri.parse(inspectedSourceUrl!),
                           title: sourceInfo!['title'] as String? ?? 'video',
                           formatId: selectedFormatId!,
                           extension: extension.isEmpty ? 'mp4' : extension,
