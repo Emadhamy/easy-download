@@ -126,11 +126,351 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   String? _downloadDirectoryPath;
   String? _androidDownloadTreeUri;
   static const int _maxConcurrentDownloads = 3;
+  static const _ytDlpAutoCheckKey = 'easy_download_yt_dlp_auto_check_v1';
+  static const _ytDlpLastCheckKey = 'easy_download_yt_dlp_last_check_v1';
+  static const _ytDlpHistoryKey = 'easy_download_yt_dlp_history_v1';
+
+  Timer? _ytDlpUpdateTimer;
+  bool _ytDlpAutoCheckEnabled = true;
+  bool _ytDlpChecking = false;
+  bool _ytDlpInstalling = false;
+  String? _ytDlpInstalledVersion;
+  String? _ytDlpLatestVersion;
+  String? _ytDlpLastCheckedAt;
+  String _ytDlpStatus = 'Preparing yt-dlp manager...';
+  int _ytDlpReceivedBytes = 0;
+  int? _ytDlpTotalBytes;
+  List<String> _ytDlpHistory = [];
 
   @override
   void initState() {
     super.initState();
     _loadHistory();
+    unawaited(_initializeYtDlpManager());
+  }
+
+  @override
+  void dispose() {
+    _ytDlpUpdateTimer?.cancel();
+    super.dispose();
+  }
+
+  bool get _ytDlpSupported => Platform.isWindows || Platform.isLinux;
+
+  Future<String> _ytDlpInstallRoot() async {
+    final support = await getApplicationSupportDirectory();
+    return '${support.path}${Platform.pathSeparator}managed-tools${Platform.pathSeparator}yt-dlp';
+  }
+
+  Future<void> _initializeYtDlpManager() async {
+    if (!_ytDlpSupported) {
+      if (mounted) {
+        setState(() => _ytDlpStatus = Platform.isAndroid
+            ? 'yt-dlp automatic installation is not available on Android yet.'
+            : 'yt-dlp is currently supported on Windows and Linux only.');
+      }
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _ytDlpAutoCheckEnabled = prefs.getBool(_ytDlpAutoCheckKey) ?? true;
+      _ytDlpLastCheckedAt = prefs.getString(_ytDlpLastCheckKey);
+      _ytDlpHistory = prefs.getStringList(_ytDlpHistoryKey) ?? [];
+    });
+
+    await _refreshInstalledYtDlp();
+    if (_ytDlpAutoCheckEnabled) {
+      await _checkYtDlpUpdates(silent: true);
+      _scheduleYtDlpChecks();
+    } else if (mounted) {
+      setState(() => _ytDlpStatus = 'Automatic update checks are paused.');
+    }
+  }
+
+  void _scheduleYtDlpChecks() {
+    _ytDlpUpdateTimer?.cancel();
+    if (!_ytDlpSupported || !_ytDlpAutoCheckEnabled) return;
+    _ytDlpUpdateTimer = Timer.periodic(const Duration(hours: 24), (_) {
+      unawaited(_checkYtDlpUpdates(silent: true));
+    });
+  }
+
+  Future<void> _setYtDlpAutoCheck(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_ytDlpAutoCheckKey, enabled);
+    if (!mounted) return;
+    setState(() {
+      _ytDlpAutoCheckEnabled = enabled;
+      _ytDlpStatus = enabled
+          ? 'Automatic checks enabled (every 24 hours while the app is open).'
+          : 'Automatic update checks are paused.';
+    });
+    _scheduleYtDlpChecks();
+    if (enabled && _ytDlpSupported) {
+      await _checkYtDlpUpdates(silent: true);
+    }
+  }
+
+  Future<void> _refreshInstalledYtDlp() async {
+    if (!_ytDlpSupported) return;
+    try {
+      final root = await _ytDlpInstallRoot();
+      final activeFile = File('$root${Platform.pathSeparator}active.json');
+      if (!await activeFile.exists()) {
+        if (mounted) setState(() => _ytDlpInstalledVersion = null);
+        return;
+      }
+      final metadata = jsonDecode(await activeFile.readAsString()) as Map<String, dynamic>;
+      final relative = metadata['executablePath'] as String?;
+      if (relative == null) throw const FormatException('Missing executable path');
+      final segments = relative.split('/');
+      if (segments.length < 3 || segments.first != 'versions' ||
+          segments.any((part) => part.isEmpty || part == '.' || part == '..')) {
+        throw const FormatException('Unsafe yt-dlp executable path');
+      }
+      final executable = '$root${Platform.pathSeparator}${segments.join(Platform.pathSeparator)}';
+      final version = await rust_api.ytDlpGetVersion(executablePath: executable);
+      if (mounted) setState(() => _ytDlpInstalledVersion = version.trim());
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _ytDlpInstalledVersion = null;
+          _ytDlpStatus = 'Installed yt-dlp could not be verified: $error';
+        });
+      }
+    }
+  }
+
+  Future<void> _checkYtDlpUpdates({bool silent = false}) async {
+    if (!_ytDlpSupported || _ytDlpChecking || _ytDlpInstalling) return;
+    if (mounted) {
+      setState(() {
+        _ytDlpChecking = true;
+        _ytDlpStatus = 'Checking the official yt-dlp release...';
+      });
+    }
+    try {
+      final raw = await rust_api.ytDlpCheckLatestRelease();
+      final release = jsonDecode(raw) as Map<String, dynamic>;
+      final latest = release['version'] as String?;
+      if (latest == null || latest.isEmpty) {
+        throw const FormatException('The official release response has no version.');
+      }
+      final checkedAt = DateTime.now().toIso8601String();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_ytDlpLastCheckKey, checkedAt);
+      if (!mounted) return;
+      setState(() {
+        _ytDlpLatestVersion = latest;
+        _ytDlpLastCheckedAt = checkedAt;
+        _ytDlpStatus = _ytDlpInstalledVersion == latest
+            ? 'yt-dlp is up to date.'
+            : 'A new yt-dlp version is available.';
+      });
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_ytDlpInstalledVersion == latest
+              ? 'yt-dlp is already up to date.'
+              : 'yt-dlp $latest is available.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _ytDlpStatus = 'Update check failed: $error');
+        if (!silent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not check yt-dlp updates: $error')),
+          );
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _ytDlpChecking = false);
+    }
+  }
+
+  Future<void> _installLatestYtDlp() async {
+    if (!_ytDlpSupported || _ytDlpInstalling || _ytDlpChecking ||
+        _ytDlpLatestVersion == null) return;
+    setState(() {
+      _ytDlpInstalling = true;
+      _ytDlpReceivedBytes = 0;
+      _ytDlpTotalBytes = null;
+      _ytDlpStatus = 'Downloading and verifying the official yt-dlp release...';
+    });
+    try {
+      final root = await _ytDlpInstallRoot();
+      await for (final raw in rust_api.ytDlpInstallLatestRelease(installRoot: root)) {
+        try {
+          final event = jsonDecode(raw) as Map<String, dynamic>;
+          final phase = event['phase'] as String?;
+          if (phase == 'downloading') {
+            if (mounted) {
+              setState(() {
+                _ytDlpReceivedBytes = (event['received'] as num?)?.toInt() ?? 0;
+                _ytDlpTotalBytes = (event['total'] as num?)?.toInt();
+                _ytDlpStatus = 'Downloading yt-dlp...';
+              });
+            }
+          } else if (phase == 'installed') {
+            if (mounted) {
+              setState(() => _ytDlpStatus = 'yt-dlp ${event['version']} installed and verified.');
+            }
+          }
+        } catch (_) {
+          // Ignore non-JSON stream messages; the stream error channel reports failures.
+        }
+      }
+      await _refreshInstalledYtDlp();
+      final version = _ytDlpInstalledVersion ?? _ytDlpLatestVersion ?? 'latest';
+      final entry = '${DateTime.now().toLocal().toString().substring(0, 16)} — Installed yt-dlp $version';
+      final prefs = await SharedPreferences.getInstance();
+      final history = [entry, ..._ytDlpHistory].take(10).toList();
+      await prefs.setStringList(_ytDlpHistoryKey, history);
+      if (!mounted) return;
+      setState(() {
+        _ytDlpHistory = history;
+        _ytDlpStatus = 'yt-dlp $version installed and verified.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('yt-dlp $version installed successfully.')),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _ytDlpStatus = 'Installation failed; the active version was not replaced: $error');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('yt-dlp installation failed: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _ytDlpInstalling = false);
+    }
+  }
+
+  String _formatYtDlpBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Widget _buildYtDlpManagerCard() {
+    final supported = _ytDlpSupported;
+    final hasUpdate = _ytDlpLatestVersion != null &&
+        _ytDlpLatestVersion != _ytDlpInstalledVersion;
+    final progress = _ytDlpTotalBytes != null && _ytDlpTotalBytes! > 0
+        ? (_ytDlpReceivedBytes / _ytDlpTotalBytes!).clamp(0.0, 1.0)
+        : null;
+    final lastCheck = _ytDlpLastCheckedAt == null
+        ? 'Not checked yet'
+        : DateTime.tryParse(_ytDlpLastCheckedAt!)?.toLocal().toString().substring(0, 16) ?? 'Unknown';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.video_library_outlined, color: Color(0xFF8B5CF6), size: 25),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('yt-dlp manager',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: supported
+                        ? const Color(0xFF16A34A).withValues(alpha: 0.14)
+                        : Colors.orange.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(supported ? 'DESKTOP' : 'NOT AVAILABLE',
+                      style: TextStyle(
+                        color: supported ? const Color(0xFF4ADE80) : Colors.orangeAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      )),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('Installed: ${_ytDlpInstalledVersion ?? 'Not installed'}'),
+            const SizedBox(height: 4),
+            Text('Latest official: ${_ytDlpLatestVersion ?? 'Not checked'}'),
+            const SizedBox(height: 4),
+            Text('Last check: $lastCheck',
+                style: const TextStyle(color: Color(0xFF9A9AAF), fontSize: 12)),
+            const SizedBox(height: 10),
+            Text(_ytDlpStatus, style: const TextStyle(color: Color(0xFFBDBDCE))),
+            if (_ytDlpInstalling) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(value: progress),
+              const SizedBox(height: 5),
+              Text(
+                _ytDlpTotalBytes == null
+                    ? _formatYtDlpBytes(_ytDlpReceivedBytes)
+                    : '${_formatYtDlpBytes(_ytDlpReceivedBytes)} / ${_formatYtDlpBytes(_ytDlpTotalBytes!)}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AAF)),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: supported && !_ytDlpChecking && !_ytDlpInstalling
+                      ? () => _checkYtDlpUpdates()
+                      : null,
+                  icon: _ytDlpChecking
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.refresh_rounded),
+                  label: const Text('Check updates'),
+                ),
+                FilledButton.icon(
+                  onPressed: supported && hasUpdate && !_ytDlpChecking && !_ytDlpInstalling
+                      ? _installLatestYtDlp
+                      : null,
+                  icon: _ytDlpInstalling
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.system_update_alt_rounded),
+                  label: Text(_ytDlpInstalledVersion == null ? 'Install yt-dlp' : 'Update now'),
+                ),
+              ],
+            ),
+            const Divider(height: 22),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Automatic update checks'),
+              subtitle: const Text('Every 24 hours while the app is open'),
+              value: _ytDlpAutoCheckEnabled,
+              onChanged: supported && !_ytDlpInstalling ? _setYtDlpAutoCheck : null,
+            ),
+            if (_ytDlpHistory.isNotEmpty) ...[
+              const Divider(height: 18),
+              const Text('Update history', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              for (final item in _ytDlpHistory.take(3))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(item, style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AAF))),
+                ),
+            ],
+            if (!supported) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Android support is intentionally disabled until an official compatible yt-dlp distribution is available.',
+                style: TextStyle(fontSize: 12, color: Color(0xFFFFB86B)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _loadHistory() async {
@@ -1022,6 +1362,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 ],
               ),
             ),
+            const SizedBox(height: 18),
+            _buildYtDlpManagerCard(),
             const SizedBox(height: 18),
             Row(
               children: [
