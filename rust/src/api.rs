@@ -188,6 +188,16 @@ pub fn yt_dlp_install_latest_release(
         .map_err(|error| format!("Could not encode installed yt-dlp metadata: {error}"))
 }
 
+/// Inspects a source and returns safe, normalized video/audio format choices.
+/// Signed media URLs and DRM-only formats are not exposed to Flutter.
+#[frb]
+pub fn yt_dlp_inspect_formats(
+    executable_path: String,
+    source_url: String,
+) -> Result<String, String> {
+    crate::yt_dlp_formats::inspect_formats(executable_path, &source_url)
+}
+
 /// Returns the version reported by the verified yt-dlp executable path.
 #[frb]
 pub fn yt_dlp_get_version(executable_path: String) -> Result<String, String> {
