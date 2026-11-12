@@ -159,11 +159,25 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   int? _ytDlpTotalBytes;
   List<String> _ytDlpHistory = [];
 
+  static const _ffmpegExecutableKey = 'easy_download_ffmpeg_executable_v1';
+  String? _ffmpegExecutablePath;
+  String? _ffmpegVersion;
+  String? _ffmpegInputPath;
+  String _ffmpegBitrate = '192k';
+  String _ffmpegStatus = 'Choose a verified FFmpeg executable to enable conversion.';
+  bool _ffmpegConverting = false;
+  bool _ffmpegPaused = false;
+  bool _ffmpegCancelRequested = false;
+  String? _ffmpegTaskId;
+  int _ffmpegElapsedMillis = 0;
+  int? _ffmpegTotalMillis;
+
   @override
   void initState() {
     super.initState();
     _loadHistory();
     unawaited(_initializeYtDlpManager());
+    unawaited(_initializeFfmpegManager());
   }
 
   @override
@@ -373,6 +387,379 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     } finally {
       if (mounted) setState(() => _ytDlpInstalling = false);
     }
+  }
+
+  bool get _ffmpegSupported => Platform.isWindows || Platform.isLinux;
+
+  Future<void> _initializeFfmpegManager() async {
+    if (!_ffmpegSupported) {
+      if (mounted) {
+        setState(() => _ffmpegStatus =
+            'FFmpeg conversion is currently available on Windows and Linux only.');
+      }
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final savedPath = prefs.getString(_ffmpegExecutableKey);
+    if (savedPath == null || savedPath.isEmpty) {
+      if (mounted) setState(() => _ffmpegStatus = 'FFmpeg is not configured yet.');
+      return;
+    }
+    try {
+      await _verifyFfmpegExecutable(savedPath, persist: false);
+    } catch (_) {
+      // The manager card displays the verification error.
+    }
+  }
+
+  Future<void> _chooseFfmpegExecutable() async {
+    if (!_ffmpegSupported || _ffmpegConverting) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+        withData: false,
+      );
+      final path = result?.files.single.path;
+      if (path == null) return;
+      await _verifyFfmpegExecutable(path, persist: true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _ffmpegStatus = 'Could not select FFmpeg: $error');
+    }
+  }
+
+  Future<void> _verifyFfmpegExecutable(String path, {required bool persist}) async {
+    if (!await File(path).exists()) {
+      throw StateError('The selected FFmpeg file does not exist.');
+    }
+    if (mounted) setState(() => _ffmpegStatus = 'Verifying FFmpeg executable...');
+    try {
+      final version = (await rust_api.ffmpegGetVersion(executablePath: path)).trim();
+      if (version.isEmpty) throw StateError('FFmpeg returned an empty version.');
+      if (persist) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_ffmpegExecutableKey, path);
+      }
+      if (!mounted) return;
+      setState(() {
+        _ffmpegExecutablePath = path;
+        _ffmpegVersion = version;
+        _ffmpegStatus = 'FFmpeg $version verified and ready.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _ffmpegExecutablePath = null;
+        _ffmpegVersion = null;
+        _ffmpegStatus = 'FFmpeg verification failed: $error';
+      });
+      rethrow;
+    }
+  }
+
+  Future<void> _chooseVideoForMp3() async {
+    if (!_ffmpegSupported || _ffmpegConverting) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        allowMultiple: false,
+        withData: false,
+      );
+      final path = result?.files.single.path;
+      if (path == null || !mounted) return;
+      setState(() {
+        _ffmpegInputPath = path;
+        _ffmpegStatus = 'Video selected. Choose a bitrate and start conversion.';
+        _ffmpegElapsedMillis = 0;
+        _ffmpegTotalMillis = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _ffmpegStatus = 'Could not select video: $error');
+    }
+  }
+
+  Future<void> _convertSelectedVideoToMp3() async {
+    final executable = _ffmpegExecutablePath;
+    final input = _ffmpegInputPath;
+    if (!_ffmpegSupported || executable == null || input == null || _ffmpegConverting) {
+      return;
+    }
+    try {
+      final inputName = input.split(RegExp(r'[\\/]')).last;
+      final baseName = inputName.contains('.')
+          ? inputName.substring(0, inputName.lastIndexOf('.'))
+          : inputName;
+      final output = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save converted MP3',
+        fileName: '$baseName.mp3',
+      );
+      if (output == null || !mounted) return;
+      if (!output.toLowerCase().endsWith('.mp3')) {
+        throw const FormatException('Choose an output filename ending in .mp3.');
+      }
+      if (await File(output).exists()) {
+        throw StateError('The selected MP3 already exists. Choose a new filename.');
+      }
+
+      final taskId = 'ffmpeg-' + DateTime.now().microsecondsSinceEpoch.toString();
+      setState(() {
+        _ffmpegConverting = true;
+        _ffmpegPaused = false;
+        _ffmpegCancelRequested = false;
+        _ffmpegTaskId = taskId;
+        _ffmpegElapsedMillis = 0;
+        _ffmpegTotalMillis = null;
+        _ffmpegStatus = 'Starting MP3 conversion...';
+      });
+
+      await for (final raw in rust_api.ffmpegConvertToMp3Controlled(
+        taskId: taskId,
+        executablePath: executable,
+        inputPath: input,
+        outputPath: output,
+        bitrate: _ffmpegBitrate,
+      )) {
+        try {
+          final event = jsonDecode(raw) as Map<String, dynamic>;
+          if (event['phase'] == 'converting' && mounted) {
+            setState(() {
+              _ffmpegElapsedMillis =
+                  (event['elapsedMillis'] as num?)?.toInt() ?? _ffmpegElapsedMillis;
+              _ffmpegTotalMillis =
+                  (event['totalMillis'] as num?)?.toInt() ?? _ffmpegTotalMillis;
+              _ffmpegStatus = 'Converting video to MP3...';
+            });
+          }
+        } catch (_) {
+          // Stream errors are delivered through the bridge error channel.
+        }
+      }
+
+      if (!mounted) return;
+      setState(() => _ffmpegStatus = _ffmpegCancelRequested
+          ? 'Conversion cancelled. The incomplete MP3 was removed.'
+          : 'MP3 conversion completed successfully: $output');
+      if (!_ffmpegCancelRequested) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('MP3 conversion completed.')),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _ffmpegStatus = _ffmpegCancelRequested
+          ? 'Conversion cancelled.'
+          : 'MP3 conversion failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _ffmpegConverting = false;
+          _ffmpegPaused = false;
+          _ffmpegTaskId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _pauseFfmpegConversion() async {
+    final taskId = _ffmpegTaskId;
+    if (taskId == null || !_ffmpegConverting || _ffmpegPaused) return;
+    try {
+      await rust_api.pauseDownload(taskId: taskId);
+      if (mounted) setState(() {
+        _ffmpegPaused = true;
+        _ffmpegStatus = 'MP3 conversion paused.';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _ffmpegStatus = 'Could not pause conversion: $error');
+    }
+  }
+
+  Future<void> _resumeFfmpegConversion() async {
+    final taskId = _ffmpegTaskId;
+    if (taskId == null || !_ffmpegConverting || !_ffmpegPaused) return;
+    try {
+      await rust_api.resumeDownload(taskId: taskId);
+      if (mounted) setState(() {
+        _ffmpegPaused = false;
+        _ffmpegStatus = 'Resuming MP3 conversion...';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _ffmpegStatus = 'Could not resume conversion: $error');
+    }
+  }
+
+  Future<void> _cancelFfmpegConversion() async {
+    final taskId = _ffmpegTaskId;
+    if (taskId == null || !_ffmpegConverting) return;
+    try {
+      setState(() {
+        _ffmpegCancelRequested = true;
+        _ffmpegStatus = 'Cancelling conversion and cleaning temporary output...';
+      });
+      await rust_api.cancelDownload(taskId: taskId);
+    } catch (error) {
+      if (mounted) setState(() => _ffmpegStatus = 'Could not cancel conversion: $error');
+    }
+  }
+
+  Widget _buildFfmpegManagerCard() {
+    final supported = _ffmpegSupported;
+    final progress = _ffmpegTotalMillis != null && _ffmpegTotalMillis! > 0
+        ? (_ffmpegElapsedMillis / _ffmpegTotalMillis!).clamp(0.0, 1.0).toDouble()
+        : null;
+    String timeLabel(int millis) {
+      final seconds = millis ~/ 1000;
+      final minutes = seconds ~/ 60;
+      return minutes.toString().padLeft(2, '0') + ':' +
+          (seconds % 60).toString().padLeft(2, '0');
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.graphic_eq_rounded, color: Color(0xFF60A5FA), size: 25),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('FFmpeg manager',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: supported
+                        ? const Color(0xFF16A34A).withValues(alpha: 0.14)
+                        : Colors.orange.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(supported ? 'DESKTOP' : 'NOT AVAILABLE',
+                      style: TextStyle(
+                        color: supported ? const Color(0xFF4ADE80) : Colors.orangeAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      )),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('Installed: ' + (_ffmpegVersion ?? 'Not verified')),
+            if (_ffmpegExecutablePath != null) ...[
+              const SizedBox(height: 4),
+              Text(_ffmpegExecutablePath!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFF9A9AAF), fontSize: 11)),
+            ],
+            const SizedBox(height: 10),
+            Text(_ffmpegStatus, style: const TextStyle(color: Color(0xFFBDBDCE))),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: supported && !_ffmpegConverting ? _chooseFfmpegExecutable : null,
+                  icon: const Icon(Icons.folder_open_rounded),
+                  label: Text(_ffmpegVersion == null ? 'Choose FFmpeg' : 'Change FFmpeg'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: supported && !_ffmpegConverting && _ffmpegExecutablePath != null
+                      ? () => _verifyFfmpegExecutable(_ffmpegExecutablePath!, persist: true)
+                      : null,
+                  icon: const Icon(Icons.verified_outlined),
+                  label: const Text('Verify'),
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+            const Text('Video to MP3', style: TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            OutlinedButton.icon(
+              onPressed: supported && !_ffmpegConverting ? _chooseVideoForMp3 : null,
+              icon: const Icon(Icons.video_file_outlined),
+              label: Text(_ffmpegInputPath == null
+                  ? 'Choose video file'
+                  : _ffmpegInputPath!.split(RegExp(r'[\\/]')).last),
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              value: _ffmpegBitrate,
+              decoration: const InputDecoration(
+                labelText: 'MP3 quality',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: const ['128k', '160k', '192k', '256k', '320k']
+                  .map((rate) => DropdownMenuItem(value: rate, child: Text(rate)))
+                  .toList(),
+              onChanged: supported && !_ffmpegConverting
+                  ? (value) {
+                      if (value != null) setState(() => _ffmpegBitrate = value);
+                    }
+                  : null,
+            ),
+            if (_ffmpegConverting) ...[
+              const SizedBox(height: 12),
+              LinearProgressIndicator(value: progress),
+              const SizedBox(height: 5),
+              Text(
+                _ffmpegTotalMillis == null
+                    ? timeLabel(_ffmpegElapsedMillis)
+                    : timeLabel(_ffmpegElapsedMillis) + ' / ' + timeLabel(_ffmpegTotalMillis!),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AAF)),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: supported &&
+                          !_ffmpegConverting &&
+                          _ffmpegExecutablePath != null &&
+                          _ffmpegInputPath != null
+                      ? _convertSelectedVideoToMp3
+                      : null,
+                  icon: const Icon(Icons.music_note_rounded),
+                  label: const Text('Convert to MP3'),
+                ),
+                if (_ffmpegConverting)
+                  OutlinedButton.icon(
+                    onPressed: _ffmpegPaused ? _resumeFfmpegConversion : _pauseFfmpegConversion,
+                    icon: Icon(_ffmpegPaused ? Icons.play_arrow_rounded : Icons.pause_rounded),
+                    label: Text(_ffmpegPaused ? 'Resume' : 'Pause'),
+                  ),
+                if (_ffmpegConverting)
+                  OutlinedButton.icon(
+                    onPressed: _cancelFfmpegConversion,
+                    icon: const Icon(Icons.close_rounded),
+                    label: const Text('Cancel'),
+                  ),
+              ],
+            ),
+            if (!supported) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'FFmpeg conversion is disabled on Android until a compatible, verified runtime is provided.',
+                style: TextStyle(fontSize: 12, color: Color(0xFFFFB86B)),
+              ),
+            ],
+            const SizedBox(height: 8),
+            const Text(
+              'FFmpeg currently uses a separately selected executable. Its independent automatic updater will be added in the next manager step.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF9A9AAF)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   String _formatYtDlpBytes(int bytes) {
@@ -1624,6 +2011,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             ),
             const SizedBox(height: 18),
             _buildYtDlpManagerCard(),
+            const SizedBox(height: 18),
+            _buildFfmpegManagerCard(),
             const SizedBox(height: 18),
             Row(
               children: [
