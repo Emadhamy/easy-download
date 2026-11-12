@@ -187,6 +187,22 @@ Stream<String> ffmpegConvertToMp3Controlled({
   bitrate: bitrate,
 );
 
+/// Downloads, verifies, extracts, probes, and installs the latest supported FFmpeg build.
+Stream<String> ffmpegInstallLatestRelease({required String installRoot}) =>
+    RustLib.instance.api.crateApiFfmpegInstallLatestRelease(
+      installRoot: installRoot,
+    );
+
+/// Returns the active managed FFmpeg installation after integrity and encoder checks.
+Future<String> ffmpegGetActiveInstallation({required String installRoot}) =>
+    RustLib.instance.api.crateApiFfmpegGetActiveInstallation(
+      installRoot: installRoot,
+    );
+
+/// Restores the previous verified FFmpeg version without changing yt-dlp.
+Future<String> ffmpegRollback({required String installRoot}) =>
+    RustLib.instance.api.crateApiFfmpegRollback(installRoot: installRoot);
+
 /// Checks the latest BtbN FFmpeg release and verifies its published checksum entry.
 /// This discovery step does not download or execute the FFmpeg archive.
 Future<String> ffmpegCheckLatestRelease() =>
