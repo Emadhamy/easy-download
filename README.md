@@ -14,14 +14,16 @@ The repository is beyond the initial scaffold. The current code includes:
 - A local download history stored with `shared_preferences`.
 - Search, file-type filters, sorting, selection, and clipboard actions.
 - A managed-tools manifest structure for yt-dlp and FFmpeg.
+- An initial Rust yt-dlp adapter for executable version probing and single-source HTTP(S) metadata inspection (not media downloading).
 
-**Verification note:** code being present does not mean every feature has been verified on every target. The latest GitHub Actions runs failed before runner steps began, so the current commit has not received a fresh CI result. See [the roadmap](docs/ROADMAP.md) and [architecture notes](docs/ARCHITECTURE.md) for implementation boundaries and known gaps.
+**Verification note:** code being present does not mean every feature has been verified on every target. GitHub Actions is used to check the current Rust and Flutter changes; platform-specific behavior still requires testing on the actual target devices. See [the roadmap](docs/ROADMAP.md) and [architecture notes](docs/ARCHITECTURE.md) for implementation boundaries and known gaps.
 
 ## Not implemented yet
 
 - Resumable downloads that continue from previously downloaded partial data.
 - Reliable background downloads and platform-specific storage handling.
-- Video extraction through yt-dlp.
+- End-to-end video downloading through yt-dlp, including verified executable provisioning and Flutter queue integration.
+- Android yt-dlp runtime support, pending a compatible and tested package.
 - MP3 conversion through FFmpeg.
 - BitTorrent support.
 - Browser integration and floating video capture.
