@@ -415,12 +415,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _chooseFfmpegExecutable() async {
     if (!_ffmpegSupported || _ffmpegConverting) return;
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-        allowMultiple: false,
-        withData: false,
-      );
-      final path = result?.files.single.path;
+      final result = await FilePicker.pickFile(type: FileType.any);
+      final path = result?.path;
       if (path == null) return;
       await _verifyFfmpegExecutable(path, persist: true);
     } catch (error) {
@@ -461,12 +457,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _chooseVideoForMp3() async {
     if (!_ffmpegSupported || _ffmpegConverting) return;
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.video,
-        allowMultiple: false,
-        withData: false,
-      );
-      final path = result?.files.single.path;
+      final result = await FilePicker.pickFile(type: FileType.video);
+      final path = result?.path;
       if (path == null || !mounted) return;
       setState(() {
         _ffmpegInputPath = path;
@@ -491,11 +483,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       final baseName = inputName.contains('.')
           ? inputName.substring(0, inputName.lastIndexOf('.'))
           : inputName;
-      final output = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save converted MP3',
-        fileName: '$baseName.mp3',
+      final outputDirectory = await FilePicker.getDirectoryPath(
+        dialogTitle: 'Choose folder for converted MP3',
       );
-      if (output == null || !mounted) return;
+      if (outputDirectory == null || !mounted) return;
+      final separator = Platform.pathSeparator;
+      final output = outputDirectory.endsWith(separator)
+          ? '$outputDirectory$baseName.mp3'
+          : '$outputDirectory$separator$baseName.mp3';
       if (!output.toLowerCase().endsWith('.mp3')) {
         throw const FormatException('Choose an output filename ending in .mp3.');
       }
