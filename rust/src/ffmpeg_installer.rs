@@ -136,7 +136,7 @@ fn download_and_verify<F>(
     url: &str,
     destination: &Path,
     expected_sha256: &str,
-    on_progress: F,
+    mut on_progress: F,
 ) -> Result<u64, String>
 where
     F: FnMut(u64, Option<u64>),
@@ -429,7 +429,7 @@ pub fn install_release<F>(
     candidate: &LatestFfmpegRelease,
     target: &str,
     install_root: impl AsRef<Path>,
-    on_progress: F,
+    mut on_progress: F,
 ) -> Result<ActiveFfmpeg, String>
 where F: FnMut(&str, u64, Option<u64>) {
     let format = validate_candidate(candidate, target)?;
