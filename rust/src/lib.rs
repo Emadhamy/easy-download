@@ -6,6 +6,7 @@ pub mod api;
 pub mod managed_tools;
 pub mod resumable;
 pub mod yt_dlp;
+pub mod yt_dlp_formats;
 pub mod yt_dlp_updates;
 pub mod yt_dlp_installer;
 
