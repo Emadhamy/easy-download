@@ -92,7 +92,7 @@ impl DownloadControl {
         }
     }
 
-    fn wait_until_running(&self) -> Result<(), String> {
+    pub(crate) fn wait_until_running(&self) -> Result<(), String> {
         let (lock, wake) = &*self.state;
         let mut state = lock.lock().map_err(|_| "Download control lock poisoned".to_string())?;
         while state.paused && !state.cancelled {
