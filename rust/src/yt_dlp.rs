@@ -61,6 +61,119 @@ pub fn get_version(executable_path: impl AsRef<Path>) -> Result<String, String> 
     Ok(version)
 }
 
+fn validate_format_download(format_id: &str, output_template: &str) -> Result<(), String> {
+    if format_id.is_empty()
+        || !format_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err("Invalid yt-dlp format identifier".to_string());
+    }
+    let template = Path::new(output_template);
+    if !template.is_absolute() {
+        return Err("Video output template must be an absolute path".to_string());
+    }
+    let file_name = template.file_name().and_then(|name| name.to_str())
+        .ok_or_else(|| "Video output template has an invalid file name".to_string())?;
+    if !file_name.contains("%(ext)s") || file_name.matches("%(ext)s").count() != 1 {
+        return Err("Video output template must contain exactly one %(ext)s placeholder".to_string());
+    }
+    let parent = template.parent().ok_or_else(|| "Video output directory is missing".to_string())?;
+    if !parent.is_dir() {
+        return Err("Video output directory does not exist".to_string());
+    }
+    Ok(())
+}
+
+/// Downloads one selected format with yt-dlp and reports structured progress.
+/// The output template must be an absolute path ending in a %(ext)s placeholder.
+pub fn download_format<F>(
+    executable_path: impl AsRef<Path>,
+    source_url: &str,
+    format_id: &str,
+    output_template: &str,
+    mut on_progress: F,
+) -> Result<String, String>
+where
+    F: FnMut(u64, Option<u64>),
+{
+    let source_url = validate_source_url(source_url)?;
+    let executable_path = executable_path.as_ref();
+    validate_executable(executable_path)?;
+    validate_format_download(format_id, output_template)?;
+
+    use std::io::{BufRead, BufReader, Read};
+    use std::process::{Stdio, Command};
+    let mut child = Command::new(executable_path)
+        .args([
+            "--ignore-config",
+            "--no-warnings",
+            "--no-playlist",
+            "--newline",
+            "--progress",
+            "--progress-template",
+            "download:ED_PROGRESS:%(progress.downloaded_bytes)s:%(progress.total_bytes_estimate)s",
+            "--format",
+            format_id,
+            "--output",
+            output_template,
+            "--print",
+            "after_move:ED_FILE:%(filepath)s",
+            "--",
+            source_url.as_str(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start yt-dlp download: {error}"))?;
+
+    let stderr = child.stderr.take()
+        .ok_or_else(|| "Could not capture yt-dlp error output".to_string())?;
+    let stderr_reader = std::thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut output = String::new();
+        let _ = reader.read_to_string(&mut output);
+        output
+    });
+
+    let stdout = child.stdout.take()
+        .ok_or_else(|| "Could not capture yt-dlp progress output".to_string())?;
+    let mut final_path: Option<String> = None;
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|error| format!("Could not read yt-dlp output: {error}"))?;
+        if let Some(value) = line.strip_prefix("ED_FILE:") {
+            if !value.trim().is_empty() {
+                final_path = Some(value.trim().to_string());
+            }
+        } else if let Some(values) = line.strip_prefix("ED_PROGRESS:") {
+            let mut parts = values.splitn(2, ':');
+            let received = parts.next().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+            let total = parts.next().and_then(|value| value.parse::<u64>().ok());
+            on_progress(received, total);
+        }
+    }
+
+    let status = child.wait()
+        .map_err(|error| format!("Could not wait for yt-dlp: {error}"))?;
+    let error_output = stderr_reader.join().unwrap_or_default();
+    if !status.success() {
+        let detail = error_output.trim();
+        let detail = if detail.len() > 2048 { &detail[..2048] } else { detail };
+        return Err(if detail.is_empty() {
+            format!("yt-dlp download failed with status {status}")
+        } else {
+            format!("yt-dlp download failed: {detail}")
+        });
+    }
+
+    let final_path = final_path.ok_or_else(|| "yt-dlp completed without reporting the output file".to_string())?;
+    let output = Path::new(&final_path);
+    let metadata = std::fs::symlink_metadata(output)
+        .map_err(|error| format!("yt-dlp output file is missing: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("yt-dlp output is not a regular file".to_string());
+    }
+    Ok(final_path)
+}
+
 /// Inspect one HTTP(S) source and return yt-dlp JSON metadata. No media is downloaded.
 pub fn inspect_source(
     executable_path: impl AsRef<Path>,
