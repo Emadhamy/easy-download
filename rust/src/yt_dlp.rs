@@ -22,8 +22,11 @@ fn validate_executable(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("yt-dlp executable path must be absolute".to_string());
     }
-    let metadata = std::fs::metadata(path)
+    let metadata = std::fs::symlink_metadata(path)
         .map_err(|error| format!("Could not access yt-dlp executable: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("yt-dlp executable must not be a symbolic link".to_string());
+    }
     if !metadata.is_file() {
         return Err("yt-dlp executable path is not a file".to_string());
     }
