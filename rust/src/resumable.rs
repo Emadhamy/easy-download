@@ -6,7 +6,8 @@
 
 use crate::{DownloadControl, DownloadUrl};
 use reqwest::blocking::{Client, Response};
-use reqwest::header::{CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE};
+use sha2::{Digest, Sha256};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -15,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ResumeMetadata {
-    url: String,
+    request_fingerprint: String,
     #[serde(default)]
     etag: Option<String>,
     #[serde(default)]
@@ -86,12 +87,31 @@ pub fn download_to_path_resumable_with_control<F>(
     input_url: &str,
     destination: impl AsRef<Path>,
     control: DownloadControl,
+    on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(u64, Option<u64>),
+{
+    download_to_path_resumable_with_control_and_headers(
+        input_url, "{}", destination, control, on_progress,
+    )
+}
+
+/// Header-aware variant used by yt-dlp media URLs. Request identity is hashed,
+/// so signed URLs and sensitive query strings are not written to the sidecar.
+pub fn download_to_path_resumable_with_control_and_headers<F>(
+    input_url: &str,
+    headers_json: &str,
+    destination: impl AsRef<Path>,
+    control: DownloadControl,
     mut on_progress: F,
 ) -> Result<u64, String>
 where
     F: FnMut(u64, Option<u64>),
 {
     let url = DownloadUrl::parse(input_url)?;
+    let headers = parse_request_headers(headers_json)?;
+    let fingerprint = request_fingerprint(url.as_str(), &headers)?;
     let destination = destination.as_ref();
     let partial = part_path(destination);
     let metadata_file = sidecar_path(destination);
@@ -106,9 +126,8 @@ where
         None
     };
 
-    // Never append bytes from a different URL or an unvalidated representation.
     if offset > 0 && !previous_metadata.as_ref().is_some_and(|metadata| {
-        metadata.url == url.as_str() && metadata.validator().is_some()
+        metadata.request_fingerprint == fingerprint && metadata.validator().is_some()
     }) {
         let _ = fs::remove_file(&partial);
         let _ = fs::remove_file(&metadata_file);
@@ -116,7 +135,7 @@ where
         previous_metadata = None;
     }
 
-    let mut request = client.get(url.as_str());
+    let mut request = client.get(url.as_str()).headers(headers.clone());
     if offset > 0 {
         let validator = previous_metadata.as_ref().and_then(ResumeMetadata::validator)
             .ok_or_else(|| "No safe HTTP validator is available for resuming".to_string())?;
@@ -139,7 +158,7 @@ where
         if old.etag.as_ref().zip(response_etag.as_ref()).is_some_and(|(a, b)| a != b)
             || old.last_modified.as_ref().zip(response_modified.as_ref()).is_some_and(|(a, b)| a != b)
         {
-            response = client.get(url.as_str()).send()
+            response = client.get(url.as_str()).headers(headers.clone()).send()
                 .map_err(|error| format!("Restart request failed: {error}"))?;
             if response.status() != StatusCode::OK {
                 return Err(format!("Server did not provide a full response after validator change: {}", response.status()));
@@ -154,7 +173,6 @@ where
             total_bytes = total;
         }
     } else if offset > 0 && response.status() == StatusCode::OK {
-        // If-Range failed or the server ignored Range: replace, never append.
         offset = 0;
         let _ = fs::remove_file(&partial);
         let _ = fs::remove_file(&metadata_file);
@@ -167,7 +185,7 @@ where
     }
 
     let metadata = ResumeMetadata {
-        url: url.as_str().to_owned(),
+        request_fingerprint: fingerprint,
         etag: header_string(&response, ETAG)
             .or_else(|| previous_metadata.as_ref().and_then(|old| old.etag.clone())),
         last_modified: header_string(&response, LAST_MODIFIED)
@@ -217,6 +235,47 @@ where
         let _ = fs::remove_file(&metadata_file);
     }
     result
+}
+
+fn parse_request_headers(encoded: &str) -> Result<HeaderMap, String> {
+    let values: serde_json::Value = serde_json::from_str(encoded)
+        .map_err(|error| format!("Invalid request headers JSON: {error}"))?;
+    let object = values.as_object()
+        .ok_or_else(|| "Request headers must be a JSON object".to_string())?;
+    if object.len() > 32 {
+        return Err("Too many request headers".to_string());
+    }
+    let mut headers = HeaderMap::new();
+    for (name, value) in object {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| "Invalid HTTP request header name".to_string())?;
+        if matches!(name.as_str(), "host" | "content-length" | "range" | "if-range" | "connection" | "transfer-encoding") {
+            return Err(format!("The request header '{}' is managed by the downloader", name));
+        }
+        let value = value.as_str()
+            .ok_or_else(|| format!("Request header '{}' must have a string value", name))?;
+        if value.len() > 8192 {
+            return Err(format!("Request header '{}' is too large", name));
+        }
+        let value = HeaderValue::from_str(value)
+            .map_err(|_| format!("Invalid value for request header '{}'", name))?;
+        headers.insert(name, value);
+    }
+    Ok(headers)
+}
+
+fn request_fingerprint(url: &str, headers: &HeaderMap) -> Result<String, String> {
+    let mut canonical = format!("{url}\\n");
+    let mut entries: Vec<_> = headers.iter().collect();
+    entries.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    for (name, value) in entries {
+        canonical.push_str(name.as_str());
+        canonical.push(':');
+        canonical.push_str(value.to_str().map_err(|_| "Invalid request header encoding".to_string())?);
+        canonical.push('\\n');
+    }
+    let digest = Sha256::digest(canonical.as_bytes());
+    Ok(format!("{:x}", digest))
 }
 
 fn response_read(response: &mut Response, buffer: &mut [u8]) -> Result<usize, String> {
