@@ -211,7 +211,7 @@ pub fn inspect_source(
 
 #[cfg(test)]
 mod tests {
-    use super::{get_version, inspect_source};
+    use super::{get_version, inspect_source, validate_format_download};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -247,6 +247,15 @@ mod tests {
         assert_eq!(parsed["id"], "fixture");
         assert_eq!(parsed["title"], "Test video");
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn selected_format_requires_safe_id_and_absolute_output_template() {
+        let output = std::env::temp_dir().join("easy-download-video-%(ext)s");
+        assert!(validate_format_download("137", output.to_str().unwrap()).is_ok());
+        assert!(validate_format_download("137+140", output.to_str().unwrap()).is_err());
+        assert!(validate_format_download("137", "relative/video.%(ext)s").is_err());
+        assert!(validate_format_download("137", "/tmp/video.mp4").is_err());
     }
 
     #[test]
