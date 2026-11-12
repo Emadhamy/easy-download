@@ -1,8 +1,8 @@
 //! HTTP Range based download continuation.
 //!
 //! Partial data is kept beside the destination in a .easy-download.part file.
-//! A sidecar records the URL and an HTTP validator so a later attempt can
-//! continue only when the remote representation is still the same.
+//! A sidecar records a request fingerprint and an HTTP validator so a later
+//! attempt can continue only when the remote representation is still the same.
 
 use crate::{DownloadControl, DownloadUrl};
 use reqwest::blocking::{Client, Response};
@@ -257,7 +257,7 @@ fn parse_request_headers(encoded: &str) -> Result<HeaderMap, String> {
         if value.len() > 8192 {
             return Err(format!("Request header '{}' is too large", name));
         }
-        let value = HeaderValue::from_str(value)
+        let value = HeaderValue::from_bytes(value.as_bytes())
             .map_err(|_| format!("Invalid value for request header '{}'", name))?;
         headers.insert(name, value);
     }
