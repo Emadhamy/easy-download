@@ -1,41 +1,43 @@
 # Architecture
 
-Easy Download uses Flutter for presentation and Rust for direct download operations.
+Easy Download uses Flutter for presentation and Rust for download operations and managed external tools.
 
 ## Current structure
 
-- `lib/main.dart` — Flutter dashboard, link list, local history, download controls, filtering, and progress presentation.
+- `lib/main.dart` — Flutter dashboard, download list, local history, download controls, filtering, and progress presentation.
 - `lib/src/rust/` — generated Dart bindings produced by `flutter_rust_bridge_codegen`.
-- `rust/src/lib.rs` — HTTP(S) URL validation and chunked file-transfer implementation.
-- `rust/src/api.rs` — bridge-facing functions for starting controlled downloads, receiving progress events, and pausing, resuming, or cancelling active tasks.
-- `rust/src/managed_tools.rs` — typed parsing and validation of yt-dlp/FFmpeg release metadata.
-- `rust/src/yt_dlp.rs` — a process adapter for version probing and single-source metadata inspection. It requires an executable path supplied by the managed-tools layer; it does not install the executable or download media.
-- `rust/resources/managed-tools/` — manifest and JSON Schema for future independently managed external tools.
+- `rust/src/lib.rs` — HTTP(S) validation and file-transfer implementation.
+- `rust/src/api.rs` — bridge-facing functions for downloads, download controls, platform detection, managed-tool release metadata, and yt-dlp inspection.
+- `rust/src/managed_tools.rs` — typed parsing and validation of yt-dlp/FFmpeg release metadata and platform targets.
+- `rust/src/yt_dlp.rs` — process adapter for version probing and single-source metadata inspection. It requires an executable path supplied by the managed-tools layer.
+- `rust/resources/managed-tools/` — release manifest and JSON Schema for independently managed external tools.
 
-## Current download flow
+## Managed tool update design
 
-1. Flutter asks the Rust API to validate a direct HTTP(S) URL.
-2. The user adds the validated link to the local download list.
-3. When started, Flutter selects a destination in the app documents directory and creates a task ID.
-4. The generated bridge calls the Rust controlled-download API.
-5. Rust streams the response to the destination and sends progress events to Flutter.
-6. Flutter updates received bytes, total size, and estimated transfer speed. Pause, resume, and cancel commands are sent to Rust using the task ID.
-7. The download list is persisted locally. Active network tasks do not survive an application restart; restored entries return to an inactive/queued state.
+yt-dlp and FFmpeg are separate managed products inside Easy Download, not application-bundled files that only change when the app is upgraded.
 
-## Important boundaries and gaps
+For yt-dlp, the intended lifecycle is:
 
-- The current direct-download implementation is not a resumable-download engine. Pause/resume controls affect an active transfer; they do not provide HTTP range-based continuation after an app restart or process loss.
-- The current destination is the app documents directory. User-selected folders, Android storage permissions, background execution, and platform-specific file access still need dedicated implementation and device testing.
-- The current UI classifies file names by extension. This is not video extraction or media conversion.
-- The yt-dlp adapter can inspect one HTTP(S) source and return JSON metadata, but it is not yet connected to a verified installed executable or the Flutter UI. It does not download media or select formats.
-- yt-dlp and FFmpeg release metadata remains disabled and empty in the checked-in manifest. No executable is downloaded or enabled. Android still needs a separately validated compatible yt-dlp runtime.
-- BitTorrent, browser integration, floating video capture, and production packaging are not implemented.
-- The current app settings action is a placeholder notice, not a complete settings screen.
+1. Query the official yt-dlp GitHub Releases API for the latest stable release.
+2. Resolve an asset only for an explicitly supported OS/CPU target; never infer Android compatibility from a Linux binary.
+3. Compare the remote version with the installed version and show the result in the dedicated yt-dlp manager.
+4. Check for updates at app startup and on a configurable interval while the app is running; also provide a manual check.
+5. Download the official asset to a staging location with bounded streaming and visible progress.
+6. Verify its SHA-256 against the digest published by the official release metadata. Reject missing or mismatched digests.
+7. Activate the verified executable from a versioned app-managed directory without overwriting the currently working version in place.
+8. Probe the newly installed executable. If activation or the version probe fails, keep or restore the previous working version.
+9. Record installed version, last check, result, and a bounded update history.
+
+The updater must fail closed on API errors, rate limits, unsupported targets, missing assets/digests, checksum mismatch, invalid executables, and disk errors. A failed update must not break an already installed working version. yt-dlp updates must not trigger an app update and must not modify FFmpeg. FFmpeg will have its own independent manager and lifecycle.
+
+## Current implementation boundary
+
+The repository currently contains the typed release-manifest foundation, staged official desktop yt-dlp metadata, platform target resolution, and a yt-dlp process adapter. It does not yet contain the complete official-release polling, downloading, checksum verification, safe installation, rollback, update history, periodic scheduler, or dedicated Flutter manager UI. The manifest deliberately keeps tool installation disabled until that lifecycle is implemented and tested.
 
 ## Engineering rules
 
 1. Flutter owns screens, user interaction, local presentation state, and platform-facing UI.
-2. Rust owns network transfer behavior and download control primitives.
+2. Rust owns network transfer behavior, trusted release resolution, binary verification, and safe managed-tool installation.
 3. Keep generated bridge files synchronized with the Rust API by running `flutter_rust_bridge_codegen generate`.
-4. Do not enable an external binary until its official release URL, target mapping, archive layout, and independently verified SHA-256 digest are known.
+4. Never enable an external binary until its official source, target mapping, digest verification, installation path, and rollback behavior are implemented.
 5. Never describe a feature as verified until its build and relevant tests have actually passed on the target platform.
