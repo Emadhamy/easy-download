@@ -367,3 +367,41 @@ pub fn ffmpeg_convert_to_mp3(
         },
     )
 }
+
+
+/// Converts a local video to MP3 with task-level pause, resume, and cancel controls.
+#[frb]
+pub fn ffmpeg_convert_to_mp3_controlled(
+    task_id: String,
+    executable_path: String,
+    input_path: String,
+    output_path: String,
+    bitrate: String,
+    sink: StreamSink<String>,
+) -> Result<String, String> {
+    let control = DownloadControl::new();
+    {
+        let mut registry = controls().lock()
+            .map_err(|_| "Download control registry lock poisoned".to_string())?;
+        if registry.contains_key(&task_id) {
+            return Err("A task with this ID is already registered".to_string());
+        }
+        registry.insert(task_id.clone(), control.clone());
+    }
+    let result = crate::ffmpeg::convert_to_mp3_controlled(
+        executable_path, input_path, output_path, &bitrate, control,
+        |elapsed_millis, total_millis| {
+            let event = serde_json::json!({
+                "taskId": task_id,
+                "phase": "converting",
+                "elapsedMillis": elapsed_millis,
+                "totalMillis": total_millis,
+            });
+            let _ = sink.add(event.to_string());
+        },
+    );
+    if let Ok(mut registry) = controls().lock() {
+        registry.remove(&task_id);
+    }
+    result
+}
