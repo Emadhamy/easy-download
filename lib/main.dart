@@ -77,12 +77,14 @@ class _LinkDraft {
   double speedBytesPerSecond = 0;
   String? savedPath;
   String? pendingPath;
+  String? ytDlpFormatId;
 
   Map<String, dynamic> toJson() => {
         'url': url.toString(),
         'fileName': fileName,
         'savedPath': savedPath,
         'pendingPath': pendingPath,
+        'ytDlpFormatId': ytDlpFormatId,
         'isFailed': isFailed,
         'isCancelled': isCancelled,
         'receivedBytes': receivedBytes,
@@ -95,11 +97,26 @@ class _LinkDraft {
     return _LinkDraft(url: parsed, fileName: json['fileName'] as String? ?? parsed.host)
       ..savedPath = json['savedPath'] as String?
       ..pendingPath = json['pendingPath'] as String?
+      ..ytDlpFormatId = json['ytDlpFormatId'] as String?
       ..isFailed = json['isFailed'] as bool? ?? false
       ..isCancelled = json['isCancelled'] as bool? ?? false
       ..receivedBytes = (json['receivedBytes'] as num?)?.toInt() ?? 0
       ..totalBytes = (json['totalBytes'] as num?)?.toInt();
   }
+}
+
+class _VideoFormatSelection {
+  const _VideoFormatSelection({
+    required this.sourceUrl,
+    required this.title,
+    required this.formatId,
+    required this.extension,
+  });
+
+  final Uri sourceUrl;
+  final String title;
+  final String formatId;
+  final String extension;
 }
 
 class DownloadHomePage extends StatefulWidget {
@@ -213,24 +230,34 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     }
   }
 
+  Future<String> _installedYtDlpExecutable() async {
+    if (!_ytDlpSupported) {
+      throw StateError('yt-dlp is supported on Windows and Linux only.');
+    }
+    final root = await _ytDlpInstallRoot();
+    final activeFile = File('$root${Platform.pathSeparator}active.json');
+    if (!await activeFile.exists()) {
+      throw StateError('yt-dlp is not installed. Install it from the yt-dlp manager first.');
+    }
+    final metadata = jsonDecode(await activeFile.readAsString()) as Map<String, dynamic>;
+    final relative = metadata['executablePath'] as String?;
+    if (relative == null) throw const FormatException('Missing executable path');
+    final segments = relative.split('/');
+    if (segments.length < 3 || segments.first != 'versions' ||
+        segments.any((part) => part.isEmpty || part == '.' || part == '..')) {
+      throw const FormatException('Unsafe yt-dlp executable path');
+    }
+    final executable = '$root${Platform.pathSeparator}${segments.join(Platform.pathSeparator)}';
+    if (!await File(executable).exists()) {
+      throw StateError('The active yt-dlp executable is missing.');
+    }
+    return executable;
+  }
+
   Future<void> _refreshInstalledYtDlp() async {
     if (!_ytDlpSupported) return;
     try {
-      final root = await _ytDlpInstallRoot();
-      final activeFile = File('$root${Platform.pathSeparator}active.json');
-      if (!await activeFile.exists()) {
-        if (mounted) setState(() => _ytDlpInstalledVersion = null);
-        return;
-      }
-      final metadata = jsonDecode(await activeFile.readAsString()) as Map<String, dynamic>;
-      final relative = metadata['executablePath'] as String?;
-      if (relative == null) throw const FormatException('Missing executable path');
-      final segments = relative.split('/');
-      if (segments.length < 3 || segments.first != 'versions' ||
-          segments.any((part) => part.isEmpty || part == '.' || part == '..')) {
-        throw const FormatException('Unsafe yt-dlp executable path');
-      }
-      final executable = '$root${Platform.pathSeparator}${segments.join(Platform.pathSeparator)}';
+      final executable = await _installedYtDlpExecutable();
       final version = await rust_api.ytDlpGetVersion(executablePath: executable);
       if (mounted) setState(() => _ytDlpInstalledVersion = version.trim());
     } catch (error) {
@@ -950,9 +977,19 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         await _saveHistory();
       }
 
+      var transferUrl = link.url.toString();
+      if (link.ytDlpFormatId != null) {
+        final executable = await _installedYtDlpExecutable();
+        transferUrl = await rust_api.ytDlpResolveFormatUrl(
+          executablePath: executable,
+          sourceUrl: link.url.toString(),
+          formatId: link.ytDlpFormatId!,
+        );
+      }
+
       await for (final event in rust_api.downloadFileResumableControlled(
         taskId: taskId,
-        inputUrl: link.url.toString(),
+        inputUrl: transferUrl,
         destinationPath: destination,
       )) {
         final progress = jsonDecode(event) as Map<String, dynamic>;
@@ -1122,6 +1159,199 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     return remainingMinutes == 0
         ? '${hours}h left'
         : '${hours}h ${remainingMinutes}m left';
+  }
+
+  Future<void> _addVideoLink() async {
+    if (!_ytDlpSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Video downloads through yt-dlp are currently supported on Windows and Linux.')),
+      );
+      return;
+    }
+    if (_ytDlpInstalledVersion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Install and verify yt-dlp in its manager before adding a video.')),
+      );
+      return;
+    }
+
+    final controller = TextEditingController();
+    String? errorText;
+    bool inspecting = false;
+    List<Map<String, dynamic>> formats = [];
+    Map<String, dynamic>? sourceInfo;
+    String? selectedFormatId;
+
+    final selection = await showDialog<_VideoFormatSelection>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> inspectSource() async {
+            if (inspecting) return;
+            setDialogState(() {
+              inspecting = true;
+              errorText = null;
+              formats = [];
+              sourceInfo = null;
+              selectedFormatId = null;
+            });
+            try {
+              final normalized = await rust_api.validateDownloadUrl(input: controller.text.trim());
+              final executable = await _installedYtDlpExecutable();
+              final raw = await rust_api.ytDlpInspectFormats(
+                executablePath: executable,
+                sourceUrl: normalized,
+              );
+              final decoded = jsonDecode(raw) as Map<String, dynamic>;
+              final available = (decoded['formats'] as List<dynamic>? ?? [])
+                  .whereType<Map<String, dynamic>>()
+                  .where((format) =>
+                      format['hasVideo'] == true && format['hasAudio'] == true)
+                  .toList();
+              if (available.isEmpty) {
+                throw StateError(
+                  'No combined video + audio format is available. This source needs separate streams, which will be supported after FFmpeg integration.',
+                );
+              }
+              if (!dialogContext.mounted) return;
+              setDialogState(() {
+                sourceInfo = decoded;
+                formats = available;
+                selectedFormatId = available.first['formatId'] as String?;
+              });
+            } catch (error) {
+              if (dialogContext.mounted) {
+                setDialogState(() => errorText = error.toString().replaceFirst('Bad state: ', ''));
+              }
+            } finally {
+              if (dialogContext.mounted) setDialogState(() => inspecting = false);
+            }
+          }
+
+          String formatLabel(Map<String, dynamic> format) {
+            final resolution = format['resolution'] as String? ?? 'Unknown quality';
+            final extension = format['ext'] as String? ?? 'video';
+            final fps = format['fps'] as num?;
+            final size = (format['filesize'] ?? format['filesizeApprox']) as num?;
+            final details = <String>[resolution, extension.toUpperCase()];
+            if (fps != null) details.add('${fps.toStringAsFixed(0)} FPS');
+            if (size != null) details.add(_formatYtDlpBytes(size.toInt()));
+            return details.join(' • ');
+          }
+
+          return AlertDialog(
+            title: const Text('Choose video quality'),
+            content: SizedBox(
+              width: 480,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      keyboardType: TextInputType.url,
+                      decoration: const InputDecoration(
+                        labelText: 'Video URL',
+                        hintText: 'https://...',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (_) => inspectSource(),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: inspecting ? null : inspectSource,
+                      icon: inspecting
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.search_rounded),
+                      label: const Text('Inspect available formats'),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 10),
+                      Text(errorText!, style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 12)),
+                    ],
+                    if (sourceInfo != null) ...[
+                      const SizedBox(height: 14),
+                      Text(sourceInfo!['title'] as String? ?? 'Video',
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: selectedFormatId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Video quality and format',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: formats.map((format) => DropdownMenuItem<String>(
+                          value: format['formatId'] as String,
+                          child: Text(formatLabel(format), overflow: TextOverflow.ellipsis),
+                        )).toList(),
+                        onChanged: (value) => setDialogState(() => selectedFormatId = value),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Only formats that already contain both video and audio are listed. Separate high-resolution streams will be available after FFmpeg is integrated.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF9A9AAF)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: sourceInfo != null && selectedFormatId != null && !inspecting
+                    ? () {
+                        final selected = formats.firstWhere(
+                          (format) => format['formatId'] == selectedFormatId,
+                        );
+                        final extension = (selected['ext'] as String? ?? 'mp4')
+                            .toLowerCase()
+                            .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                        Navigator.of(dialogContext).pop(_VideoFormatSelection(
+                          sourceUrl: Uri.parse(controller.text.trim()),
+                          title: sourceInfo!['title'] as String? ?? 'video',
+                          formatId: selectedFormatId!,
+                          extension: extension.isEmpty ? 'mp4' : extension,
+                        ));
+                      }
+                    : null,
+                icon: const Icon(Icons.playlist_add_rounded),
+                label: const Text('Add to download queue'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    controller.dispose();
+    if (!mounted || selection == null) return;
+    final duplicate = _links.any((link) =>
+        link.url == selection.sourceUrl && link.ytDlpFormatId == selection.formatId);
+    if (duplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This video and format are already in the queue.')),
+      );
+      return;
+    }
+
+    final safeTitle = sanitizeDownloadFileName(selection.title, fallback: 'video');
+    final draft = _LinkDraft(
+      url: selection.sourceUrl,
+      fileName: '$safeTitle.${selection.extension}',
+    )..ytDlpFormatId = selection.formatId;
+    setState(() => _links.insert(0, draft));
+    await _saveHistory();
+    _pumpQueue();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Video added to the download queue.')),
+    );
   }
 
   Future<void> _addLink() async {
@@ -1330,10 +1560,21 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                     style: TextStyle(color: muted, height: 1.4),
                   ),
                   const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: _addLink,
-                    icon: const Icon(Icons.add_link_rounded),
-                    label: const Text('Add a link'),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _addLink,
+                        icon: const Icon(Icons.add_link_rounded),
+                        label: const Text('Add a link'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _addVideoLink,
+                        icon: const Icon(Icons.video_library_outlined),
+                        label: const Text('Video quality'),
+                      ),
+                    ],
                   ),
                   if (_links.any((link) => link.isDownloading && link.isPaused)) ...[
                     const SizedBox(height: 8),
