@@ -83,8 +83,10 @@ fn validate_format_download(format_id: &str, output_template: &str) -> Result<()
     Ok(())
 }
 
-/// Resolves a selected combined format to one short-lived HTTP(S) media URL.
-pub fn resolve_format_url(
+/// Resolves a selected format into a short-lived media URL and the HTTP
+/// headers yt-dlp says are required to fetch it. The JSON is passed directly
+/// to the controlled downloader and is never written to the queue or sidecar.
+pub fn resolve_format_request(
     executable_path: impl AsRef<Path>,
     source_url: &str,
     format_id: &str,
@@ -103,7 +105,8 @@ pub fn resolve_format_url(
             "--ignore-config",
             "--no-warnings",
             "--no-playlist",
-            "--get-url",
+            "--skip-download",
+            "--dump-single-json",
             "--format",
             format_id,
             "--",
@@ -117,21 +120,45 @@ pub fn resolve_format_url(
         let detail = if detail.len() > 1024 { &detail[..1024] } else { detail };
         return Err(format!("Could not resolve selected yt-dlp format: {detail}"));
     }
-    let stdout_text = String::from_utf8_lossy(&output.stdout).into_owned();
-    let urls: Vec<&str> = stdout_text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect();
-    if urls.len() != 1 {
-        return Err("This format requires separate audio/video streams; FFmpeg integration is needed".to_string());
-    }
-    let media_url = Url::parse(urls[0])
+
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("yt-dlp returned invalid format metadata: {error}"))?;
+    let requested = metadata.get("requested_downloads")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first());
+    let selected = requested.or_else(|| {
+        metadata.get("formats")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|formats| formats.iter().find(|item| {
+                item.get("format_id").and_then(serde_json::Value::as_str) == Some(format_id)
+            }))
+    }).unwrap_or(&metadata);
+
+    let media_url = selected.get("url")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "yt-dlp did not provide a direct URL for the selected format".to_string())?;
+    let media_url = Url::parse(media_url)
         .map_err(|error| format!("yt-dlp returned an invalid media URL: {error}"))?;
     if !matches!(media_url.scheme(), "http" | "https") || media_url.host_str().is_none() {
         return Err("yt-dlp returned an unsupported media URL".to_string());
     }
-    Ok(media_url.to_string())
+
+    let mut headers = serde_json::Map::new();
+    if let Some(values) = selected.get("http_headers").and_then(serde_json::Value::as_object) {
+        for (name, value) in values {
+            let Some(value) = value.as_str() else { continue };
+            if value.len() <= 8192 && !matches!(name.to_ascii_lowercase().as_str(),
+                "host" | "content-length" | "range" | "if-range" | "connection" | "transfer-encoding")
+            {
+                headers.insert(name.clone(), serde_json::Value::String(value.to_owned()));
+            }
+        }
+    }
+
+    serde_json::to_string(&serde_json::json!({
+        "url": media_url.as_str(),
+        "headers": headers,
+    })).map_err(|error| format!("Could not encode resolved media request: {error}"))
 }
 
 /// Downloads one selected format with yt-dlp and reports structured progress.
