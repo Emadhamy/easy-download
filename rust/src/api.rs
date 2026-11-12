@@ -139,6 +139,23 @@ pub fn get_managed_tool_release(tool_name: String) -> Result<Option<String>, Str
         .map_err(|error| format!("Could not encode release metadata: {error}"))
 }
 
+
+/// Returns the version reported by the verified yt-dlp executable path.
+#[frb]
+pub fn yt_dlp_get_version(executable_path: String) -> Result<String, String> {
+    crate::yt_dlp::get_version(executable_path)
+}
+
+/// Inspects a single HTTP(S) video source without downloading media.
+/// Returns yt-dlp JSON metadata for the later format-selection stage.
+#[frb]
+pub fn yt_dlp_inspect_source(
+    executable_path: String,
+    source_url: String,
+) -> Result<String, String> {
+    crate::yt_dlp::inspect_source(executable_path, &source_url)
+}
+
 /// Validates and normalizes a direct HTTP(S) download URL.
 pub fn validate_download_url(input: String) -> Result<String, String> {
     DownloadUrl::parse(&input).map(|url| url.as_str().to_owned())
