@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod ffmpeg;
+pub mod ffmpeg_updates;
 pub mod managed_tools;
 pub mod resumable;
 pub mod yt_dlp;
@@ -35,156 +36,83 @@ impl DownloadUrl {
             "http" | "https" => {}
             scheme => return Err(format!("Unsupported URL scheme: {scheme}")),
         }
-
         if parsed.host_str().is_none() {
             return Err("URL must include a host".to_string());
         }
-
         Ok(Self(parsed.to_string()))
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
 /// Thread-safe controls for a running download.
-///
-/// Pause takes effect between network reads. Cancel is checked before writing
-/// the next received chunk; an in-flight blocking read may finish first.
 #[derive(Clone, Default)]
 pub struct DownloadControl {
     state: Arc<(Mutex<DownloadState>, Condvar)>,
 }
-
 #[derive(Default)]
-struct DownloadState {
-    paused: bool,
-    cancelled: bool,
-}
-
+struct DownloadState { paused: bool, cancelled: bool }
 impl DownloadControl {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+    pub fn new() -> Self { Self::default() }
     pub fn pause(&self) {
         let (lock, _) = &*self.state;
-        if let Ok(mut state) = lock.lock() {
-            state.paused = true;
-        }
+        if let Ok(mut state) = lock.lock() { state.paused = true; }
     }
-
     pub fn resume(&self) {
         let (lock, wake) = &*self.state;
-        if let Ok(mut state) = lock.lock() {
-            state.paused = false;
-            wake.notify_all();
-        }
+        if let Ok(mut state) = lock.lock() { state.paused = false; wake.notify_all(); }
     }
-
     pub fn cancel(&self) {
         let (lock, wake) = &*self.state;
-        if let Ok(mut state) = lock.lock() {
-            state.cancelled = true;
-            state.paused = false;
-            wake.notify_all();
-        }
+        if let Ok(mut state) = lock.lock() { state.cancelled = true; state.paused = false; wake.notify_all(); }
     }
-
     pub(crate) fn wait_until_running(&self) -> Result<(), String> {
         let (lock, wake) = &*self.state;
         let mut state = lock.lock().map_err(|_| "Download control lock poisoned".to_string())?;
         while state.paused && !state.cancelled {
             state = wake.wait(state).map_err(|_| "Download control lock poisoned".to_string())?;
         }
-        if state.cancelled {
-            return Err("Download cancelled".to_string());
-        }
+        if state.cancelled { return Err("Download cancelled".to_string()); }
         Ok(())
     }
 }
 
-/// Streams a direct HTTP(S) download and supports pause/resume/cancel controls.
-/// Progress callback receives (bytes_received, total_bytes).
-pub fn download_to_path_with_control<F>(
-    input_url: &str,
-    destination: impl AsRef<Path>,
-    control: DownloadControl,
-    mut on_progress: F,
-) -> Result<u64, String>
-where
-    F: FnMut(u64, Option<u64>),
-{
+pub fn download_to_path_with_control<F>(input_url: &str, destination: impl AsRef<Path>, control: DownloadControl, mut on_progress: F) -> Result<u64, String>
+where F: FnMut(u64, Option<u64>) {
     let url = DownloadUrl::parse(input_url)?;
     let destination = destination.as_ref();
-    let client = Client::builder()
-        .build()
-        .map_err(|error| format!("Could not create HTTP client: {error}"))?;
-    let mut response = client
-        .get(url.as_str())
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("Download request failed: {error}"))?;
-
+    let client = Client::builder().build().map_err(|error| format!("Could not create HTTP client: {error}"))?;
+    let mut response = client.get(url.as_str()).send().and_then(|response| response.error_for_status()).map_err(|error| format!("Download request failed: {error}"))?;
     let mut temporary_name = destination.as_os_str().to_os_string();
     temporary_name.push(".easy-download.part");
     let temporary_path = Path::new(&temporary_name);
-
     let result = (|| {
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(temporary_path)
-            .map_err(|error| format!("Could not create temporary download file: {error}"))?;
-
+        let mut output = OpenOptions::new().write(true).create_new(true).open(temporary_path).map_err(|error| format!("Could not create temporary download file: {error}"))?;
         let total_bytes = response.content_length();
         let mut received_bytes = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
-
         loop {
             control.wait_until_running()?;
-            let bytes_read = response.read(&mut buffer)
-                .map_err(|error| format!("Could not read download response: {error}"))?;
-            if bytes_read == 0 {
-                break;
-            }
+            let bytes_read = response.read(&mut buffer).map_err(|error| format!("Could not read download response: {error}"))?;
+            if bytes_read == 0 { break; }
             control.wait_until_running()?;
-            output.write_all(&buffer[..bytes_read])
-                .map_err(|error| format!("Could not write downloaded data: {error}"))?;
+            output.write_all(&buffer[..bytes_read]).map_err(|error| format!("Could not write downloaded data: {error}"))?;
             received_bytes += bytes_read as u64;
             on_progress(received_bytes, total_bytes);
         }
-
-        output.flush()
-            .map_err(|error| format!("Could not flush downloaded data: {error}"))?;
-        output.sync_all()
-            .map_err(|error| format!("Could not sync downloaded data: {error}"))?;
+        output.flush().map_err(|error| format!("Could not flush downloaded data: {error}"))?;
+        output.sync_all().map_err(|error| format!("Could not sync downloaded data: {error}"))?;
         drop(output);
-
-        std::fs::rename(temporary_path, destination)
-            .map_err(|error| format!("Could not finalize downloaded file: {error}"))?;
+        std::fs::rename(temporary_path, destination).map_err(|error| format!("Could not finalize downloaded file: {error}"))?;
         Ok(received_bytes)
     })();
-
-    if result.is_err() {
-        let _ = remove_file(temporary_path);
-    }
-
+    if result.is_err() { let _ = remove_file(temporary_path); }
     result
 }
 
-pub fn download_to_path_with_progress<F>(
-    input_url: &str,
-    destination: impl AsRef<Path>,
-    on_progress: F,
-) -> Result<u64, String>
-where
-    F: FnMut(u64, Option<u64>),
-{
+pub fn download_to_path_with_progress<F>(input_url: &str, destination: impl AsRef<Path>, on_progress: F) -> Result<u64, String>
+where F: FnMut(u64, Option<u64>) {
     download_to_path_with_control(input_url, destination, DownloadControl::new(), on_progress)
 }
-
 pub fn download_to_path(input_url: &str, destination: impl AsRef<Path>) -> Result<u64, String> {
     download_to_path_with_progress(input_url, destination, |_, _| {})
 }
@@ -196,73 +124,41 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
-
     fn test_destination(label: &str) -> std::path::PathBuf {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         std::env::temp_dir().join(format!("easy-download-{label}-{unique}.bin"))
     }
-
     fn serve_body(body: &'static [u8]) -> (String, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 1024];
-            let _ = stream.read(&mut request);
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            let mut request = [0_u8; 1024]; let _ = stream.read(&mut request);
+            write!(stream, "HTTP/1.1 200 OK\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n", body.len()).unwrap();
             stream.write_all(body).unwrap();
         });
         (format!("http://{address}/download"), handle)
     }
-
     #[test]
     fn completed_download_is_renamed_to_destination_and_temp_file_is_removed() {
-        let body = b"easy-download-test-payload";
-        let (url, server) = serve_body(body);
-        let destination = test_destination("complete");
+        let body = b"easy-download-test-payload"; let (url, server) = serve_body(body); let destination = test_destination("complete");
         let temporary = destination.with_file_name(format!("{}.easy-download.part", destination.file_name().unwrap().to_string_lossy()));
-        let received = download_to_path_with_progress(&url, &destination, |_, _| {}).unwrap();
-        server.join().unwrap();
-        assert_eq!(received, body.len() as u64);
-        assert_eq!(std::fs::read(&destination).unwrap(), body);
-        assert!(!temporary.exists());
-        std::fs::remove_file(destination).unwrap();
+        let received = download_to_path_with_progress(&url, &destination, |_, _| {}).unwrap(); server.join().unwrap();
+        assert_eq!(received, body.len() as u64); assert_eq!(std::fs::read(&destination).unwrap(), body); assert!(!temporary.exists()); std::fs::remove_file(destination).unwrap();
     }
-
     #[test]
     fn cancelled_download_does_not_leave_a_final_or_temporary_file() {
-        let body = b"cancel-this-download";
-        let (url, server) = serve_body(body);
-        let destination = test_destination("cancel");
+        let body = b"cancel-this-download"; let (url, server) = serve_body(body); let destination = test_destination("cancel");
         let temporary = destination.with_file_name(format!("{}.easy-download.part", destination.file_name().unwrap().to_string_lossy()));
-        let control = DownloadControl::new();
-        let cancel_control = control.clone();
-        let result = download_to_path_with_control(&url, &destination, control, |_, _| cancel_control.cancel());
-        server.join().unwrap();
-        assert!(result.unwrap_err().contains("cancelled"));
-        assert!(!destination.exists());
-        assert!(!temporary.exists());
+        let control = DownloadControl::new(); let cancel_control = control.clone();
+        let result = download_to_path_with_control(&url, &destination, control, |_, _| cancel_control.cancel()); server.join().unwrap();
+        assert!(result.unwrap_err().contains("cancelled")); assert!(!destination.exists()); assert!(!temporary.exists());
     }
-
-    #[test]
-    fn accepts_https_url() {
-        let url = DownloadUrl::parse("https://example.com/file.zip").unwrap();
-        assert_eq!(url.as_str(), "https://example.com/file.zip");
-    }
-
-    #[test]
-    fn rejects_non_http_scheme() { assert!(DownloadUrl::parse("file:///tmp/example.zip").is_err()); }
-
-    #[test]
-    fn downloader_rejects_non_http_scheme_before_requesting() {
-        assert!(download_to_path("file:///tmp/example.zip", "/tmp/easy-download-invalid-scheme-test.zip").is_err());
-    }
-
-    #[test]
-    fn progress_downloader_rejects_invalid_scheme_before_callback() {
-        let mut callback_called = false;
-        let result = download_to_path_with_progress("file:///tmp/example.zip", "/tmp/easy-download-invalid-scheme-progress-test.zip", |_, _| callback_called = true);
-        assert!(result.is_err());
-        assert!(!callback_called);
+    #[test] fn accepts_https_url() { let url = DownloadUrl::parse("https://example.com/file.zip").unwrap(); assert_eq!(url.as_str(), "https://example.com/file.zip"); }
+    #[test] fn rejects_non_http_scheme() { assert!(DownloadUrl::parse("file:///tmp/example.zip").is_err()); }
+    #[test] fn downloader_rejects_non_http_scheme_before_requesting() { assert!(download_to_path("file:///tmp/example.zip", "/tmp/easy-download-invalid-scheme-test.zip").is_err()); }
+    #[test] fn progress_downloader_rejects_invalid_scheme_before_callback() {
+        let mut callback_called = false; let result = download_to_path_with_progress("file:///tmp/example.zip", "/tmp/easy-download-invalid-scheme-progress-test.zip", |_, _| callback_called = true);
+        assert!(result.is_err()); assert!(!callback_called);
     }
 }
