@@ -212,7 +212,7 @@ fn extract_zip(archive_path: &Path, destination: &Path, executable_name: &str) -
         if expanded > MAX_EXPANDED_ARCHIVE_BYTES {
             return Err("The FFmpeg ZIP expands beyond the permitted size".to_string());
         }
-        let Some(path) = entry.enclosed_name().map(Path::to_path_buf) else { continue; };
+        let Some(path) = entry.enclosed_name() else { continue; };
         if !is_expected_binary(&path, executable_name) { continue; }
         if found { return Err("The FFmpeg ZIP contains multiple FFmpeg executables".to_string()); }
         if entry.size() == 0 || entry.size() > MAX_EXECUTABLE_BYTES {
@@ -253,7 +253,7 @@ fn extract_tar_xz(archive_path: &Path, destination: &Path, executable_name: &str
         if count > MAX_ARCHIVE_ENTRIES {
             return Err("The FFmpeg TAR.XZ contains too many entries".to_string());
         }
-        let mut entry = item.map_err(|error| format!("Could not inspect FFmpeg TAR entry: {error}"))?;
+        let entry = item.map_err(|error| format!("Could not inspect FFmpeg TAR entry: {error}"))?;
         let size = entry.size();
         expanded = expanded.saturating_add(size);
         if expanded > MAX_EXPANDED_ARCHIVE_BYTES {
@@ -429,7 +429,7 @@ pub fn install_release<F>(
     candidate: &LatestFfmpegRelease,
     target: &str,
     install_root: impl AsRef<Path>,
-    mut on_progress: F,
+    on_progress: F,
 ) -> Result<ActiveFfmpeg, String>
 where F: FnMut(&str, u64, Option<u64>) {
     let format = validate_candidate(candidate, target)?;
