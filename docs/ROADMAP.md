@@ -9,7 +9,7 @@ This roadmap distinguishes code that is already present from work that still nee
 - [x] Add HTTP(S) URL validation.
 - [x] Add the Flutter–Rust bridge and generated Dart bindings.
 - [x] Add GitHub Actions workflows for project checks.
-- [ ] Obtain a clean, current CI run after the runner-startup issue is resolved.
+- [x] Obtain clean CI runs on GitHub-hosted runners.
 
 ## Phase 2 — Direct downloads
 
@@ -20,9 +20,9 @@ This roadmap distinguishes code that is already present from work that still nee
 - [x] Persist download-list history locally.
 - [x] Add retry, queue actions, and basic history management in the UI.
 - [ ] Verify transfer behavior with real files and network edge cases.
-- [ ] Add HTTP range-based resume after interruption or application restart.
-- [ ] Add robust temporary-file handling and safe finalization.
-- [ ] Add user-selected save locations and destination conflict controls.
+- [x] Add HTTP range-based resume with validator-aware recovery.
+- [x] Add temporary-file handling, safe finalization, and protected resume metadata.
+- [x] Add user-selected save locations and destination conflict controls.
 - [ ] Add durable task-state persistence and recovery.
 
 ## Phase 3 — Video and audio
@@ -49,11 +49,15 @@ This roadmap distinguishes code that is already present from work that still nee
 ### Video and audio workflow
 
 - [x] Add a Rust format catalogue for yt-dlp metadata, excluding DRM-only entries and signed media URLs.
-- [ ] Connect source inspection and format selection to the Flutter workflow and download queue.
-- [ ] Add format and quality selection UI.
-- [ ] Integrate FFmpeg for audio extraction and MP3 conversion.
+- [x] Add video URL inspection and quality/format selection UI.
+- [x] Connect selected formats to the resumable queue with per-request headers.
+- [x] Add the initial safe Rust FFmpeg adapter for version probing and local video-to-MP3 conversion, with bitrate selection and progress events.
+- [ ] Add pause/cancel controls and robust temporary-output cleanup to FFmpeg conversion.
+- [ ] Connect MP3 conversion to the Flutter workflow and download/task UI.
 - [ ] Build a separate FFmpeg settings/status section and independent update/install lifecycle.
-- [ ] Verify FFmpeg official sources, checksums, archive extraction, executable permissions, and rollback behavior.
+- [ ] Verify and document trusted FFmpeg binary providers per platform; FFmpeg upstream publishes source code and links to independent binary maintainers.
+- [ ] Verify archive checksums/signatures, extraction, executable permissions, versioned activation, and rollback behavior.
+- [ ] Complete real-site and Windows/Linux runtime verification.
 
 ## Phase 4 — Advanced features
 
