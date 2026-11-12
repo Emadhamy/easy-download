@@ -63,6 +63,16 @@ Stream<String> ytDlpInstallLatestRelease({required String installRoot}) =>
       installRoot: installRoot,
     );
 
+/// Inspects a source and returns safe, normalized video/audio format choices.
+/// Signed media URLs and DRM-only formats are not exposed to Flutter.
+Future<String> ytDlpInspectFormats({
+  required String executablePath,
+  required String sourceUrl,
+}) => RustLib.instance.api.crateApiYtDlpInspectFormats(
+  executablePath: executablePath,
+  sourceUrl: sourceUrl,
+);
+
 /// Returns the version reported by the verified yt-dlp executable path.
 Future<String> ytDlpGetVersion({required String executablePath}) => RustLib
     .instance

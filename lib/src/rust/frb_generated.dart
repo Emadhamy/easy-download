@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -490456222;
+  int get rustContentHash => 1704915726;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -116,6 +116,11 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateApiYtDlpCheckLatestRelease();
 
   Future<String> crateApiYtDlpGetVersion({required String executablePath});
+
+  Future<String> crateApiYtDlpInspectFormats({
+    required String executablePath,
+    required String sourceUrl,
+  });
 
   Future<String> crateApiYtDlpInspectSource({
     required String executablePath,
@@ -530,7 +535,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
-  Future<String> crateApiYtDlpInspectSource({
+  Future<String> crateApiYtDlpInspectFormats({
     required String executablePath,
     required String sourceUrl,
   }) {
@@ -544,6 +549,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             generalizedFrbRustBinding,
             serializer,
             funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiYtDlpInspectFormatsConstMeta,
+        argValues: [executablePath, sourceUrl],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiYtDlpInspectFormatsConstMeta =>
+      const TaskConstMeta(
+        debugName: "yt_dlp_inspect_formats",
+        argNames: ["executablePath", "sourceUrl"],
+      );
+
+  @override
+  Future<String> crateApiYtDlpInspectSource({
+    required String executablePath,
+    required String sourceUrl,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(executablePath, serializer);
+          sse_encode_String(sourceUrl, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
             port: port_,
           );
         },
@@ -578,7 +618,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 14,
+              funcId: 15,
               port: port_,
             );
           },

@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -490456222;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1704915726;
 
 // Section: executor
 
@@ -472,6 +472,41 @@ fn wire__crate__api__yt_dlp_get_version_impl(
         },
     )
 }
+fn wire__crate__api__yt_dlp_inspect_formats_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "yt_dlp_inspect_formats",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_executable_path = <String>::sse_decode(&mut deserializer);
+            let api_source_url = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::api::yt_dlp_inspect_formats(api_executable_path, api_source_url)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__yt_dlp_inspect_source_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -654,8 +689,9 @@ fn pde_ffi_dispatcher_primary_impl(
         10 => wire__crate__api__validate_download_url_impl(port, ptr, rust_vec_len, data_len),
         11 => wire__crate__api__yt_dlp_check_latest_release_impl(port, ptr, rust_vec_len, data_len),
         12 => wire__crate__api__yt_dlp_get_version_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__yt_dlp_inspect_source_impl(port, ptr, rust_vec_len, data_len),
-        14 => {
+        13 => wire__crate__api__yt_dlp_inspect_formats_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__yt_dlp_inspect_source_impl(port, ptr, rust_vec_len, data_len),
+        15 => {
             wire__crate__api__yt_dlp_install_latest_release_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
