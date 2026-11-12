@@ -48,8 +48,9 @@ This roadmap distinguishes code that is already present from work that still nee
 
 ### Video and audio workflow
 
-- [ ] Connect source inspection to the Flutter workflow and download queue.
-- [ ] Add format and quality selection.
+- [x] Add a Rust format catalogue for yt-dlp metadata, excluding DRM-only entries and signed media URLs.
+- [ ] Connect source inspection and format selection to the Flutter workflow and download queue.
+- [ ] Add format and quality selection UI.
 - [ ] Integrate FFmpeg for audio extraction and MP3 conversion.
 - [ ] Build a separate FFmpeg settings/status section and independent update/install lifecycle.
 - [ ] Verify FFmpeg official sources, checksums, archive extraction, executable permissions, and rollback behavior.
