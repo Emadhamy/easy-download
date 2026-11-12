@@ -198,6 +198,16 @@ pub fn yt_dlp_inspect_formats(
     crate::yt_dlp_formats::inspect_formats(executable_path, &source_url)
 }
 
+/// Resolves a selected yt-dlp format to a single HTTP(S) media URL.
+#[frb]
+pub fn yt_dlp_resolve_format_url(
+    executable_path: String,
+    source_url: String,
+    format_id: String,
+) -> Result<String, String> {
+    crate::yt_dlp::resolve_format_url(executable_path, &source_url, &format_id)
+}
+
 /// Downloads one selected yt-dlp format and streams byte progress events.
 #[frb]
 pub fn yt_dlp_download_format(
