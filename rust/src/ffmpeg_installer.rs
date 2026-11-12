@@ -227,6 +227,7 @@ fn extract_zip(archive_path: &Path, destination: &Path, executable_name: &str) -
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn extract_tar_xz(archive_path: &Path, destination: &Path, executable_name: &str) -> Result<(), String> {
     let file = File::open(archive_path)
         .map_err(|error| format!("Could not open FFmpeg TAR.XZ archive: {error}"))?;
@@ -265,6 +266,12 @@ fn extract_tar_xz(archive_path: &Path, destination: &Path, executable_name: &str
     }
     if !found { return Err("The FFmpeg TAR.XZ does not contain bin/ffmpeg".to_string()); }
     Ok(())
+}
+
+
+#[cfg(not(target_os = "linux"))]
+fn extract_tar_xz(_archive_path: &Path, _destination: &Path, _executable_name: &str) -> Result<(), String> {
+    Err("TAR.XZ FFmpeg archives are supported only on Linux".to_string())
 }
 
 fn set_executable_permissions(path: &Path) -> Result<(), String> {
