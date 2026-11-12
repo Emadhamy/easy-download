@@ -40,6 +40,20 @@ Stream<String> downloadFileResumableControlled({
   destinationPath: destinationPath,
 );
 
+/// Starts a resumable download with validated per-request HTTP headers.
+/// Headers are supplied as a JSON object and are not stored in resume metadata.
+Stream<String> downloadFileResumableControlledWithHeaders({
+  required String taskId,
+  required String inputUrl,
+  required String headersJson,
+  required String destinationPath,
+}) => RustLib.instance.api.crateApiDownloadFileResumableControlledWithHeaders(
+  taskId: taskId,
+  inputUrl: inputUrl,
+  headersJson: headersJson,
+  destinationPath: destinationPath,
+);
+
 /// Returns the canonical OS/CPU key for this application build.
 Future<String> getCurrentPlatformTarget() =>
     RustLib.instance.api.crateApiGetCurrentPlatformTarget();
