@@ -103,6 +103,21 @@ jobs:
           if-no-files-found: error
 
 
+  windows-rust-check:
+    name: Windows native Rust tests
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust tests on Windows
+        working-directory: rust
+        run: cargo test
+
+
   rust-check:
     name: Rust tests and bridge generation
     runs-on: ubuntu-latest
