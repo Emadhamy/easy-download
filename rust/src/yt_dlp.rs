@@ -117,7 +117,8 @@ pub fn resolve_format_url(
         let detail = if detail.len() > 1024 { &detail[..1024] } else { detail };
         return Err(format!("Could not resolve selected yt-dlp format: {detail}"));
     }
-    let urls: Vec<&str> = String::from_utf8_lossy(&output.stdout)
+    let stdout_text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let urls: Vec<&str> = stdout_text
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
