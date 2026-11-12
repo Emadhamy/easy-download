@@ -265,14 +265,14 @@ fn parse_request_headers(encoded: &str) -> Result<HeaderMap, String> {
 }
 
 fn request_fingerprint(url: &str, headers: &HeaderMap) -> Result<String, String> {
-    let mut canonical = format!("{url}\\n");
+    let mut canonical = format!("{url}\n");
     let mut entries: Vec<_> = headers.iter().collect();
     entries.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     for (name, value) in entries {
         canonical.push_str(name.as_str());
         canonical.push(':');
         canonical.push_str(value.to_str().map_err(|_| "Invalid request header encoding".to_string())?);
-        canonical.push('\\n');
+        canonical.push('\n');
     }
     let digest = Sha256::digest(canonical.as_bytes());
     Ok(format!("{:x}", digest))
@@ -284,7 +284,7 @@ fn response_read(response: &mut Response, buffer: &mut [u8]) -> Result<usize, St
 
 #[cfg(test)]
 mod tests {
-    use super::download_to_path_resumable_with_control;
+    use super::{download_to_path_resumable_with_control, parse_request_headers, request_fingerprint};
     use crate::DownloadControl;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -305,6 +305,17 @@ mod tests {
             bytes.extend_from_slice(&chunk[..count]);
         }
         String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    #[test]
+    fn request_headers_are_validated_and_fingerprinted_without_exposing_values() {
+        let headers = parse_request_headers(r#"{"User-Agent":"EasyDownloadTest","Referer":"https://example.com/watch"}"#).unwrap();
+        let fingerprint = request_fingerprint("https://cdn.example/video?token=secret", &headers).unwrap();
+        assert_eq!(fingerprint.len(), 64);
+        assert!(!fingerprint.contains("secret"));
+        assert!(parse_request_headers(r#"{"Range":"bytes=0-"}"#).is_err());
+        assert!(parse_request_headers(r#"{"X-Test":7}"#).is_err());
+        assert!(parse_request_headers("[]").is_err());
     }
 
     #[test]
