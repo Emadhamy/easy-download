@@ -8,7 +8,8 @@ Easy Download uses Flutter for presentation and Rust for direct download operati
 - `lib/src/rust/` — generated Dart bindings produced by `flutter_rust_bridge_codegen`.
 - `rust/src/lib.rs` — HTTP(S) URL validation and chunked file-transfer implementation.
 - `rust/src/api.rs` — bridge-facing functions for starting controlled downloads, receiving progress events, and pausing, resuming, or cancelling active tasks.
-- `rust/src/managed_tools.rs` — typed parsing and validation of yt-dlp/FFmpeg release metadata. This module does not download or execute external tools.
+- `rust/src/managed_tools.rs` — typed parsing and validation of yt-dlp/FFmpeg release metadata.
+- `rust/src/yt_dlp.rs` — a process adapter for version probing and single-source metadata inspection. It requires an executable path supplied by the managed-tools layer; it does not install the executable or download media.
 - `rust/resources/managed-tools/` — manifest and JSON Schema for future independently managed external tools.
 
 ## Current download flow
@@ -26,7 +27,8 @@ Easy Download uses Flutter for presentation and Rust for direct download operati
 - The current direct-download implementation is not a resumable-download engine. Pause/resume controls affect an active transfer; they do not provide HTTP range-based continuation after an app restart or process loss.
 - The current destination is the app documents directory. User-selected folders, Android storage permissions, background execution, and platform-specific file access still need dedicated implementation and device testing.
 - The current UI classifies file names by extension. This is not video extraction or media conversion.
-- yt-dlp and FFmpeg release metadata is disabled and empty in the checked-in manifest. The managed-tools module validates metadata only; it does not fetch, install, update, or execute binaries.
+- The yt-dlp adapter can inspect one HTTP(S) source and return JSON metadata, but it is not yet connected to a verified installed executable or the Flutter UI. It does not download media or select formats.
+- yt-dlp and FFmpeg release metadata remains disabled and empty in the checked-in manifest. No executable is downloaded or enabled. Android still needs a separately validated compatible yt-dlp runtime.
 - BitTorrent, browser integration, floating video capture, and production packaging are not implemented.
 - The current app settings action is a placeholder notice, not a complete settings screen.
 
