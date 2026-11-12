@@ -405,3 +405,15 @@ pub fn ffmpeg_convert_to_mp3_controlled(
     }
     result
 }
+
+
+/// Checks the latest BtbN FFmpeg release and verifies its published checksum entry.
+/// This discovery step does not download or execute the FFmpeg archive.
+#[frb]
+pub fn ffmpeg_check_latest_release() -> Result<String, String> {
+    let target = Target::current()
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))?;
+    let release = crate::ffmpeg_updates::fetch_latest_release(&target.key())?;
+    serde_json::to_string(&release)
+        .map_err(|error| format!("Could not encode latest FFmpeg release: {error}"))
+}
