@@ -55,6 +55,9 @@ This roadmap distinguishes code that is already present from work that still nee
 - [ ] Add pause/cancel controls and robust temporary-output cleanup to FFmpeg conversion.
 - [ ] Connect MP3 conversion to the Flutter workflow and download/task UI.
 - [ ] Build a separate FFmpeg settings/status section and independent update/install lifecycle.
+- [x] Add FFmpeg latest-release discovery for Windows/Linux desktop targets using BtbN release metadata and its published checksums.sha256 file.
+- [ ] Download the selected static GPL archive with bounded streaming, verify its SHA-256, safely extract only ffmpeg, and probe the staged executable.
+- [ ] Activate FFmpeg by versioned atomic pointer with a verified previous-version rollback path.
 - [ ] Verify and document trusted FFmpeg binary providers per platform; FFmpeg upstream publishes source code and links to independent binary maintainers.
 - [ ] Verify archive checksums/signatures, extraction, executable permissions, versioned activation, and rollback behavior.
 - [ ] Complete real-site and Windows/Linux runtime verification.
@@ -63,6 +66,7 @@ This roadmap distinguishes code that is already present from work that still nee
 
 - [ ] Add BitTorrent support.
 - [ ] Add browser link handoff and browser integration.
+- [ ] On Android, receive shared URLs from other apps through the system Share sheet and present download/video format options.
 - [ ] Design and implement the floating video-capture indicator.
 - [ ] Add polished platform-specific UX and accessibility improvements.
 
