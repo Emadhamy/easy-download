@@ -218,9 +218,14 @@ fn extract_zip(archive_path: &Path, destination: &Path, executable_name: &str) -
         }
         let mut output = OpenOptions::new().write(true).create_new(true).open(destination)
             .map_err(|error| format!("Could not create staged FFmpeg executable: {error}"))?;
-        std::io::copy(&mut entry, &mut output)
-            .and_then(|_| output.sync_all())
+        let declared_size = entry.size();
+        let copied = std::io::copy(&mut entry.take(MAX_EXECUTABLE_BYTES + 1), &mut output)
             .map_err(|error| format!("Could not extract FFmpeg executable: {error}"))?;
+        if copied != declared_size || copied > MAX_EXECUTABLE_BYTES {
+            return Err("The extracted FFmpeg executable size does not match the archive metadata".to_string());
+        }
+        output.sync_all()
+            .map_err(|error| format!("Could not sync extracted FFmpeg executable: {error}"))?;
         found = true;
     }
     if !found { return Err("The FFmpeg ZIP does not contain bin/ffmpeg.exe".to_string()); }
@@ -259,9 +264,13 @@ fn extract_tar_xz(archive_path: &Path, destination: &Path, executable_name: &str
         }
         let mut output = OpenOptions::new().write(true).create_new(true).open(destination)
             .map_err(|error| format!("Could not create staged FFmpeg executable: {error}"))?;
-        std::io::copy(&mut entry, &mut output)
-            .and_then(|_| output.sync_all())
+        let copied = std::io::copy(&mut entry.take(MAX_EXECUTABLE_BYTES + 1), &mut output)
             .map_err(|error| format!("Could not extract FFmpeg executable: {error}"))?;
+        if copied != size || copied > MAX_EXECUTABLE_BYTES {
+            return Err("The extracted FFmpeg executable size does not match the TAR metadata".to_string());
+        }
+        output.sync_all()
+            .map_err(|error| format!("Could not sync extracted FFmpeg executable: {error}"))?;
         found = true;
     }
     if !found { return Err("The FFmpeg TAR.XZ does not contain bin/ffmpeg".to_string()); }
