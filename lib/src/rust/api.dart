@@ -152,3 +152,22 @@ Future<BigInt> downloadFile({
   inputUrl: inputUrl,
   destinationPath: destinationPath,
 );
+
+/// Returns the version reported by a verified FFmpeg executable.
+Future<String> ffmpegGetVersion({required String executablePath}) => RustLib
+    .instance
+    .api
+    .crateApiFfmpegGetVersion(executablePath: executablePath);
+
+/// Converts a local video to MP3 and streams elapsed-media-time progress.
+Stream<String> ffmpegConvertToMp3({
+  required String executablePath,
+  required String inputPath,
+  required String outputPath,
+  required String bitrate,
+}) => RustLib.instance.api.crateApiFfmpegConvertToMp3(
+  executablePath: executablePath,
+  inputPath: inputPath,
+  outputPath: outputPath,
+  bitrate: bitrate,
+);
