@@ -32,7 +32,7 @@ This roadmap distinguishes code that is already present from work that still nee
 - [x] Add the initial Rust yt-dlp adapter for version probing and single-source HTTP(S) metadata inspection.
 - [x] Stage official desktop release metadata and SHA-256 digests for supported targets.
 - [ ] Implement an independent yt-dlp manager screen/settings section in Flutter.
-- [ ] Read the latest stable release from the official yt-dlp GitHub Releases API; do not use third-party mirrors.
+- [x] Read the latest stable release from the official yt-dlp GitHub Releases API; do not use third-party mirrors.
 - [ ] Compare installed and latest versions and show release details before updating.
 - [ ] Add automatic update checks on app startup and a configurable periodic check while the app is running.
 - [ ] Add a manual "Check for updates" action and a separate "Update now" action.
