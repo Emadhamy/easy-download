@@ -111,8 +111,9 @@ jobs:
           # Enabled tools must have at least one configured release.
           enabled_without_release = copy.deepcopy(manifest)
           enabled_without_release['tools']['ytDlp']['enabled'] = True
-          if enabled_without_release['tools']['ytDlp']['releases']:
-              raise SystemExit('Negative test setup failed: expected empty releases.')
+          # The real manifest now contains staged desktop releases. Empty the
+          # candidate explicitly to test the enabled-without-release rule.
+          enabled_without_release['tools']['ytDlp']['releases'] = {}
           if not list(validator.iter_errors(enabled_without_release)):
               raise SystemExit('Negative test failed: enabled tool without a release was accepted.')
           print('Negative test passed: enabled tool without a release is rejected by the schema.')
