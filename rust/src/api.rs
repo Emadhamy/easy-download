@@ -198,6 +198,34 @@ pub fn yt_dlp_inspect_formats(
     crate::yt_dlp_formats::inspect_formats(executable_path, &source_url)
 }
 
+/// Downloads one selected yt-dlp format and streams byte progress events.
+#[frb]
+pub fn yt_dlp_download_format(
+    executable_path: String,
+    source_url: String,
+    format_id: String,
+    output_template: String,
+    sink: StreamSink<String>,
+) -> Result<String, String> {
+    let output_path = crate::yt_dlp::download_format(
+        executable_path,
+        &source_url,
+        &format_id,
+        &output_template,
+        |received, total| {
+            let event = serde_json::json!({
+                "phase": "downloading",
+                "received": received,
+                "total": total,
+            });
+            let _ = sink.add(event.to_string());
+        },
+    )?;
+    let event = serde_json::json!({ "phase": "completed", "outputPath": output_path });
+    let _ = sink.add(event.to_string());
+    Ok(output_path)
+}
+
 /// Returns the version reported by the verified yt-dlp executable path.
 #[frb]
 pub fn yt_dlp_get_version(executable_path: String) -> Result<String, String> {
