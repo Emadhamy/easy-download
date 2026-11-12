@@ -7,6 +7,12 @@ on:
 permissions:
   contents: write
 
+# Only the newest push/PR for a branch should run this workflow. This prevents
+# concurrent bridge-generation jobs from racing while committing generated files.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   flutter-check:
     name: Flutter analyze and test
