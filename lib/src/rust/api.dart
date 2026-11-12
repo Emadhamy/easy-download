@@ -73,6 +73,30 @@ Future<String> ytDlpInspectFormats({
   sourceUrl: sourceUrl,
 );
 
+/// Resolves a selected yt-dlp format to a single HTTP(S) media URL.
+Future<String> ytDlpResolveFormatUrl({
+  required String executablePath,
+  required String sourceUrl,
+  required String formatId,
+}) => RustLib.instance.api.crateApiYtDlpResolveFormatUrl(
+  executablePath: executablePath,
+  sourceUrl: sourceUrl,
+  formatId: formatId,
+);
+
+/// Downloads one selected yt-dlp format and streams byte progress events.
+Stream<String> ytDlpDownloadFormat({
+  required String executablePath,
+  required String sourceUrl,
+  required String formatId,
+  required String outputTemplate,
+}) => RustLib.instance.api.crateApiYtDlpDownloadFormat(
+  executablePath: executablePath,
+  sourceUrl: sourceUrl,
+  formatId: formatId,
+  outputTemplate: outputTemplate,
+);
+
 /// Returns the version reported by the verified yt-dlp executable path.
 Future<String> ytDlpGetVersion({required String executablePath}) => RustLib
     .instance

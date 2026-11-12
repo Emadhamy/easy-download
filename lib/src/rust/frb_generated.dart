@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1704915726;
+  int get rustContentHash => -2054742241;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -115,6 +115,13 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateApiYtDlpCheckLatestRelease();
 
+  Stream<String> crateApiYtDlpDownloadFormat({
+    required String executablePath,
+    required String sourceUrl,
+    required String formatId,
+    required String outputTemplate,
+  });
+
   Future<String> crateApiYtDlpGetVersion({required String executablePath});
 
   Future<String> crateApiYtDlpInspectFormats({
@@ -129,6 +136,12 @@ abstract class RustLibApi extends BaseApi {
 
   Stream<String> crateApiYtDlpInstallLatestRelease({
     required String installRoot,
+  });
+
+  Future<String> crateApiYtDlpResolveFormatUrl({
+    required String executablePath,
+    required String sourceUrl,
+    required String formatId,
   });
 }
 
@@ -505,6 +518,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Stream<String> crateApiYtDlpDownloadFormat({
+    required String executablePath,
+    required String sourceUrl,
+    required String formatId,
+    required String outputTemplate,
+  }) {
+    final sink = RustStreamSink<String>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_String(executablePath, serializer);
+            sse_encode_String(sourceUrl, serializer);
+            sse_encode_String(formatId, serializer);
+            sse_encode_String(outputTemplate, serializer);
+            sse_encode_StreamSink_String_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 12,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_String,
+            decodeErrorData: sse_decode_String,
+          ),
+          constMeta: kCrateApiYtDlpDownloadFormatConstMeta,
+          argValues: [
+            executablePath,
+            sourceUrl,
+            formatId,
+            outputTemplate,
+            sink,
+          ],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiYtDlpDownloadFormatConstMeta =>
+      const TaskConstMeta(
+        debugName: "yt_dlp_download_format",
+        argNames: [
+          "executablePath",
+          "sourceUrl",
+          "formatId",
+          "outputTemplate",
+          "sink",
+        ],
+      );
+
+  @override
   Future<String> crateApiYtDlpGetVersion({required String executablePath}) {
     return handler.executeNormal(
       NormalTask(
@@ -514,7 +583,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 13,
             port: port_,
           );
         },
@@ -548,7 +617,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 14,
             port: port_,
           );
         },
@@ -583,7 +652,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 15,
             port: port_,
           );
         },
@@ -618,7 +687,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 15,
+              funcId: 16,
               port: port_,
             );
           },
@@ -639,6 +708,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "yt_dlp_install_latest_release",
         argNames: ["installRoot", "sink"],
+      );
+
+  @override
+  Future<String> crateApiYtDlpResolveFormatUrl({
+    required String executablePath,
+    required String sourceUrl,
+    required String formatId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(executablePath, serializer);
+          sse_encode_String(sourceUrl, serializer);
+          sse_encode_String(formatId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiYtDlpResolveFormatUrlConstMeta,
+        argValues: [executablePath, sourceUrl, formatId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiYtDlpResolveFormatUrlConstMeta =>
+      const TaskConstMeta(
+        debugName: "yt_dlp_resolve_format_url",
+        argNames: ["executablePath", "sourceUrl", "formatId"],
       );
 
   @protected
