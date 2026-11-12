@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 267685004;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1586574593;
 
 // Section: executor
 
@@ -323,6 +323,54 @@ fn wire__crate__api__ffmpeg_convert_to_mp3_impl(
             move |context| {
                 transform_result_sse::<_, String>((move || {
                     let output_ok = crate::api::ffmpeg_convert_to_mp3(
+                        api_executable_path,
+                        api_input_path,
+                        api_output_path,
+                        api_bitrate,
+                        api_sink,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__ffmpeg_convert_to_mp3_controlled_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "ffmpeg_convert_to_mp3_controlled",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_task_id = <String>::sse_decode(&mut deserializer);
+            let api_executable_path = <String>::sse_decode(&mut deserializer);
+            let api_input_path = <String>::sse_decode(&mut deserializer);
+            let api_output_path = <String>::sse_decode(&mut deserializer);
+            let api_bitrate = <String>::sse_decode(&mut deserializer);
+            let api_sink =
+                <StreamSink<String, flutter_rust_bridge::for_generated::SseCodec>>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::ffmpeg_convert_to_mp3_controlled(
+                        api_task_id,
                         api_executable_path,
                         api_input_path,
                         api_output_path,
@@ -899,21 +947,27 @@ fn pde_ffi_dispatcher_primary_impl(
         ),
         6 => wire__crate__api__download_file_with_progress_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__api__ffmpeg_convert_to_mp3_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__ffmpeg_get_version_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__get_current_platform_target_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__get_managed_tool_release_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__pause_download_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__resume_download_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__validate_download_url_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__yt_dlp_check_latest_release_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__yt_dlp_download_format_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__yt_dlp_get_version_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__yt_dlp_inspect_formats_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__yt_dlp_inspect_source_impl(port, ptr, rust_vec_len, data_len),
-        19 => {
+        8 => wire__crate__api__ffmpeg_convert_to_mp3_controlled_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        9 => wire__crate__api__ffmpeg_get_version_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__get_current_platform_target_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__get_managed_tool_release_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__pause_download_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__resume_download_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__validate_download_url_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__yt_dlp_check_latest_release_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__yt_dlp_download_format_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__yt_dlp_get_version_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__yt_dlp_inspect_formats_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__yt_dlp_inspect_source_impl(port, ptr, rust_vec_len, data_len),
+        20 => {
             wire__crate__api__yt_dlp_install_latest_release_impl(port, ptr, rust_vec_len, data_len)
         }
-        20 => {
+        21 => {
             wire__crate__api__yt_dlp_resolve_format_request_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),

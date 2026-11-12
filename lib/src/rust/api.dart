@@ -171,3 +171,18 @@ Stream<String> ffmpegConvertToMp3({
   outputPath: outputPath,
   bitrate: bitrate,
 );
+
+/// Converts a local video to MP3 with task-level pause, resume, and cancel controls.
+Stream<String> ffmpegConvertToMp3Controlled({
+  required String taskId,
+  required String executablePath,
+  required String inputPath,
+  required String outputPath,
+  required String bitrate,
+}) => RustLib.instance.api.crateApiFfmpegConvertToMp3Controlled(
+  taskId: taskId,
+  executablePath: executablePath,
+  inputPath: inputPath,
+  outputPath: outputPath,
+  bitrate: bitrate,
+);
