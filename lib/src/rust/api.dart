@@ -87,7 +87,8 @@ Future<String> ytDlpInspectFormats({
   sourceUrl: sourceUrl,
 );
 
-/// Resolves a selected yt-dlp format to a URL and required HTTP headers.
+/// Resolves a selected yt-dlp format to JSON containing its short-lived URL
+/// and the HTTP headers required by the media host.
 Future<String> ytDlpResolveFormatRequest({
   required String executablePath,
   required String sourceUrl,

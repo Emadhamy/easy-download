@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1454559496;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 646841137;
 
 // Section: executor
 
@@ -672,7 +672,7 @@ fn wire__crate__api__yt_dlp_install_latest_release_impl(
         },
     )
 }
-fn wire__crate__api__yt_dlp_resolve_format_url_impl(
+fn wire__crate__api__yt_dlp_resolve_format_request_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -680,7 +680,7 @@ fn wire__crate__api__yt_dlp_resolve_format_url_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "yt_dlp_resolve_format_url",
+            debug_name: "yt_dlp_resolve_format_request",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -700,7 +700,7 @@ fn wire__crate__api__yt_dlp_resolve_format_url_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::yt_dlp_resolve_format_url(
+                    let output_ok = crate::api::yt_dlp_resolve_format_request(
                         api_executable_path,
                         api_source_url,
                         api_format_id,
@@ -832,7 +832,9 @@ fn pde_ffi_dispatcher_primary_impl(
         17 => {
             wire__crate__api__yt_dlp_install_latest_release_impl(port, ptr, rust_vec_len, data_len)
         }
-        18 => wire__crate__api__yt_dlp_resolve_format_url_impl(port, ptr, rust_vec_len, data_len),
+        18 => {
+            wire__crate__api__yt_dlp_resolve_format_request_impl(port, ptr, rust_vec_len, data_len)
+        }
         _ => unreachable!(),
     }
 }

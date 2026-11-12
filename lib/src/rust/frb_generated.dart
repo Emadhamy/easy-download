@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1454559496;
+  int get rustContentHash => 646841137;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -145,7 +145,7 @@ abstract class RustLibApi extends BaseApi {
     required String installRoot,
   });
 
-  Future<String> crateApiYtDlpResolveFormatUrl({
+  Future<String> crateApiYtDlpResolveFormatRequest({
     required String executablePath,
     required String sourceUrl,
     required String formatId,
@@ -770,7 +770,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiYtDlpResolveFormatUrl({
+  Future<String> crateApiYtDlpResolveFormatRequest({
     required String executablePath,
     required String sourceUrl,
     required String formatId,
@@ -793,16 +793,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_String,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateApiYtDlpResolveFormatUrlConstMeta,
+        constMeta: kCrateApiYtDlpResolveFormatRequestConstMeta,
         argValues: [executablePath, sourceUrl, formatId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiYtDlpResolveFormatUrlConstMeta =>
+  TaskConstMeta get kCrateApiYtDlpResolveFormatRequestConstMeta =>
       const TaskConstMeta(
-        debugName: "yt_dlp_resolve_format_url",
+        debugName: "yt_dlp_resolve_format_request",
         argNames: ["executablePath", "sourceUrl", "formatId"],
       );
 
