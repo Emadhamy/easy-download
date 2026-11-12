@@ -50,6 +50,22 @@ Future<String> getCurrentPlatformTarget() =>
 Future<String?> getManagedToolRelease({required String toolName}) =>
     RustLib.instance.api.crateApiGetManagedToolRelease(toolName: toolName);
 
+/// Returns the version reported by the verified yt-dlp executable path.
+Future<String> ytDlpGetVersion({required String executablePath}) => RustLib
+    .instance
+    .api
+    .crateApiYtDlpGetVersion(executablePath: executablePath);
+
+/// Inspects a single HTTP(S) video source without downloading media.
+/// Returns yt-dlp JSON metadata for the later format-selection stage.
+Future<String> ytDlpInspectSource({
+  required String executablePath,
+  required String sourceUrl,
+}) => RustLib.instance.api.crateApiYtDlpInspectSource(
+  executablePath: executablePath,
+  sourceUrl: sourceUrl,
+);
+
 /// Validates and normalizes a direct HTTP(S) download URL.
 Future<String> validateDownloadUrl({required String input}) =>
     RustLib.instance.api.crateApiValidateDownloadUrl(input: input);

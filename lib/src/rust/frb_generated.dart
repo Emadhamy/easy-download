@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -280718719;
+  int get rustContentHash => -697542577;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -112,6 +112,13 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiResumeDownload({required String taskId});
 
   Future<String> crateApiValidateDownloadUrl({required String input});
+
+  Future<String> crateApiYtDlpGetVersion({required String executablePath});
+
+  Future<String> crateApiYtDlpInspectSource({
+    required String executablePath,
+    required String sourceUrl,
+  });
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -455,6 +462,70 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         debugName: "validate_download_url",
         argNames: ["input"],
       );
+
+  @override
+  Future<String> crateApiYtDlpGetVersion({required String executablePath}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(executablePath, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiYtDlpGetVersionConstMeta,
+        argValues: [executablePath],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiYtDlpGetVersionConstMeta => const TaskConstMeta(
+    debugName: "yt_dlp_get_version",
+    argNames: ["executablePath"],
+  );
+
+  @override
+  Future<String> crateApiYtDlpInspectSource({
+    required String executablePath,
+    required String sourceUrl,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(executablePath, serializer);
+          sse_encode_String(sourceUrl, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiYtDlpInspectSourceConstMeta,
+        argValues: [executablePath, sourceUrl],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiYtDlpInspectSourceConstMeta => const TaskConstMeta(
+    debugName: "yt_dlp_inspect_source",
+    argNames: ["executablePath", "sourceUrl"],
+  );
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
