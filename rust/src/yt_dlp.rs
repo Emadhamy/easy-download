@@ -295,13 +295,33 @@ mod tests {
 
     #[cfg(unix)]
     fn fake_executable(script: &str, label: &str) -> std::path::PathBuf {
+        use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
+
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("easy-download-yt-dlp-{label}-{unique}"));
-        fs::write(&path, script).unwrap();
-        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        let stem = format!(
+            "easy-download-yt-dlp-{label}-{}-{unique}",
+            std::process::id()
+        );
+        let directory = std::env::temp_dir();
+        let path = directory.join(&stem);
+        let staging_path = directory.join(format!("{stem}.staging"));
+
+        // Publish the fixture atomically so no test can execute a script while
+        // its contents or executable permissions are still being written.
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staging_path)
+            .unwrap();
+        file.write_all(script.as_bytes()).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+
+        let mut permissions = fs::metadata(&staging_path).unwrap().permissions();
         permissions.set_mode(0o700);
-        fs::set_permissions(&path, permissions).unwrap();
+        fs::set_permissions(&staging_path, permissions).unwrap();
+        fs::rename(&staging_path, &path).unwrap();
         path
     }
 
