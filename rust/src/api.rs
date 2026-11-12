@@ -9,6 +9,7 @@ use std::sync::{Mutex, OnceLock};
 use flutter_rust_bridge::frb;
 use crate::frb_generated::StreamSink;
 use crate::managed_tools::{Manifest, Target, ToolKind};
+use crate::yt_dlp_updates::fetch_latest_release;
 use serde_json;
 
 // Controls are retained by task ID so Flutter can send pause/resume/cancel
@@ -139,6 +140,18 @@ pub fn get_managed_tool_release(tool_name: String) -> Result<Option<String>, Str
         .map_err(|error| format!("Could not encode release metadata: {error}"))
 }
 
+
+/// Checks the latest stable yt-dlp release through the official GitHub API.
+/// The returned candidate includes the official asset URL and published SHA-256.
+/// This operation never downloads or installs the executable.
+#[frb]
+pub fn yt_dlp_check_latest_release() -> Result<String, String> {
+    let target = Target::current()
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))?;
+    let release = fetch_latest_release(&target.key())?;
+    serde_json::to_string(&release)
+        .map_err(|error| format!("Could not encode latest yt-dlp release: {error}"))
+}
 
 /// Returns the version reported by the verified yt-dlp executable path.
 #[frb]
