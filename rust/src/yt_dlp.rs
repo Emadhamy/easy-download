@@ -83,6 +83,56 @@ fn validate_format_download(format_id: &str, output_template: &str) -> Result<()
     Ok(())
 }
 
+/// Resolves a selected combined format to one short-lived HTTP(S) media URL.
+pub fn resolve_format_url(
+    executable_path: impl AsRef<Path>,
+    source_url: &str,
+    format_id: &str,
+) -> Result<String, String> {
+    let source_url = validate_source_url(source_url)?;
+    let executable_path = executable_path.as_ref();
+    validate_executable(executable_path)?;
+    if format_id.is_empty()
+        || !format_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err("Invalid yt-dlp format identifier".to_string());
+    }
+
+    let output = Command::new(executable_path)
+        .args([
+            "--ignore-config",
+            "--no-warnings",
+            "--no-playlist",
+            "--get-url",
+            "--format",
+            format_id,
+            "--",
+            source_url.as_str(),
+        ])
+        .output()
+        .map_err(|error| format!("Could not start yt-dlp format resolver: {error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = detail.trim();
+        let detail = if detail.len() > 1024 { &detail[..1024] } else { detail };
+        return Err(format!("Could not resolve selected yt-dlp format: {detail}"));
+    }
+    let urls: Vec<&str> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if urls.len() != 1 {
+        return Err("This format requires separate audio/video streams; FFmpeg integration is needed".to_string());
+    }
+    let media_url = Url::parse(urls[0])
+        .map_err(|error| format!("yt-dlp returned an invalid media URL: {error}"))?;
+    if !matches!(media_url.scheme(), "http" | "https") || media_url.host_str().is_none() {
+        return Err("yt-dlp returned an unsupported media URL".to_string());
+    }
+    Ok(media_url.to_string())
+}
+
 /// Downloads one selected format with yt-dlp and reports structured progress.
 /// The output template must be an absolute path ending in a %(ext)s placeholder.
 pub fn download_format<F>(
