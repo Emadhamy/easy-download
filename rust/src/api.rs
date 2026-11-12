@@ -335,3 +335,35 @@ mod tests {
         assert!(validate_download_url("file:///tmp/file.zip".to_string()).is_err());
     }
 }
+
+
+/// Returns the version reported by a verified FFmpeg executable.
+#[frb]
+pub fn ffmpeg_get_version(executable_path: String) -> Result<String, String> {
+    crate::ffmpeg::get_version(executable_path)
+}
+
+/// Converts a local video to MP3 and streams elapsed-media-time progress.
+#[frb]
+pub fn ffmpeg_convert_to_mp3(
+    executable_path: String,
+    input_path: String,
+    output_path: String,
+    bitrate: String,
+    sink: StreamSink<String>,
+) -> Result<String, String> {
+    crate::ffmpeg::convert_to_mp3(
+        executable_path,
+        input_path,
+        output_path,
+        &bitrate,
+        |elapsed_millis, total_millis| {
+            let event = serde_json::json!({
+                "phase": "converting",
+                "elapsedMillis": elapsed_millis,
+                "totalMillis": total_millis,
+            });
+            let _ = sink.add(event.to_string());
+        },
+    )
+}
