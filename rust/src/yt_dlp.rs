@@ -44,10 +44,20 @@ fn validate_executable(path: &Path) -> Result<(), String> {
 pub fn get_version(executable_path: impl AsRef<Path>) -> Result<String, String> {
     let executable_path = executable_path.as_ref();
     validate_executable(executable_path)?;
-    let output = Command::new(executable_path)
-        .arg("--version")
-        .output()
-        .map_err(|error| format!("Could not start yt-dlp: {error}"))?;
+    // Linux can transiently return ETXTBSY when a freshly published executable
+    // is observed during filesystem metadata propagation. Retry only that
+    // specific transient error; all other spawn failures are returned immediately.
+    let mut attempt = 0;
+    let output = loop {
+        match Command::new(executable_path).arg("--version").output() {
+            Ok(output) => break output,
+            Err(error) if error.raw_os_error() == Some(26) && attempt < 5 => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => return Err(format!("Could not start yt-dlp: {error}")),
+        }
+    };
     if !output.status.success() {
         return Err(format!(
             "yt-dlp version probe failed: {}",
