@@ -5,7 +5,6 @@
 pub mod api;
 pub mod ffmpeg;
 pub mod ffmpeg_updates;
-pub mod ffmpeg_updates;
 pub mod managed_tools;
 pub mod resumable;
 pub mod yt_dlp;
