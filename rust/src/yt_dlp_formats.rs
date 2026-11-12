@@ -126,6 +126,7 @@ pub fn inspect_formats(
 #[cfg(test)]
 mod tests {
     use super::formats_from_metadata;
+    use serde_json::Value;
 
     #[test]
     fn exposes_video_audio_and_combined_formats_without_signed_urls() {
