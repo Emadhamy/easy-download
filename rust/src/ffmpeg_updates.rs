@@ -6,6 +6,7 @@
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::time::Duration;
 
 const RELEASE_API: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
@@ -84,6 +85,21 @@ fn http_client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(45))
         .user_agent("Easy-Download/ffmpeg-updater")
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let url = attempt.url();
+            let trusted = url.scheme() == "https"
+                && matches!(
+                    url.host_str(),
+                    Some("github.com")
+                        | Some("release-assets.githubusercontent.com")
+                        | Some("objects.githubusercontent.com")
+                );
+            if trusted && attempt.previous().len() < 5 {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .build()
         .map_err(|error| format!("Could not create FFmpeg release client: {error}"))
 }
@@ -113,13 +129,21 @@ pub fn fetch_latest_release(target: &str) -> Result<LatestFfmpegRelease, String>
     validate_release_url(&archive.browser_download_url, &release.tag_name, expected_name)?;
     validate_release_url(&checksum_asset.browser_download_url, &release.tag_name, CHECKSUM_ASSET)?;
 
-    let checksum_text = client.get(&checksum_asset.browser_download_url)
+    let mut checksum_response = client.get(&checksum_asset.browser_download_url)
         .send()
         .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("Could not download the FFmpeg publisher checksum list: {error}"))?
-        .text()
+        .map_err(|error| format!("Could not download the FFmpeg publisher checksum list: {error}"))?;
+    const MAX_CHECKSUM_BYTES: u64 = 128 * 1024;
+    if checksum_response.content_length().is_some_and(|size| size > MAX_CHECKSUM_BYTES) {
+        return Err("The FFmpeg publisher checksum list is unexpectedly large".to_string());
+    }
+    let mut checksum_text = String::new();
+    checksum_response
+        .by_ref()
+        .take(MAX_CHECKSUM_BYTES + 1)
+        .read_to_string(&mut checksum_text)
         .map_err(|error| format!("Could not read the FFmpeg publisher checksum list: {error}"))?;
-    if checksum_text.len() > 128 * 1024 {
+    if checksum_text.len() as u64 > MAX_CHECKSUM_BYTES {
         return Err("The FFmpeg publisher checksum list is unexpectedly large".to_string());
     }
     let sha256 = parse_checksum_file(&checksum_text, expected_name)?;
