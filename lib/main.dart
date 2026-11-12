@@ -359,7 +359,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     final hasUpdate = _ytDlpLatestVersion != null &&
         _ytDlpLatestVersion != _ytDlpInstalledVersion;
     final progress = _ytDlpTotalBytes != null && _ytDlpTotalBytes! > 0
-        ? (_ytDlpReceivedBytes / _ytDlpTotalBytes!).clamp(0.0, 1.0)
+        ? (_ytDlpReceivedBytes / _ytDlpTotalBytes!).clamp(0.0, 1.0).toDouble()
         : null;
     final lastCheck = _ytDlpLastCheckedAt == null
         ? 'Not checked yet'
