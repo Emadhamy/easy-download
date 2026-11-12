@@ -4,6 +4,7 @@
 //! a regular local input file, and a new .mp3 destination inside an existing
 //! directory. Progress is reported from FFmpeg's machine-readable progress pipe.
 
+use crate::DownloadControl;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -117,101 +118,111 @@ pub fn get_version(executable_path: impl AsRef<Path>) -> Result<String, String> 
     Ok(first_line)
 }
 
-/// Extracts the first audio stream to a new MP3 file and reports elapsed media time.
+/// Extracts audio to a staged MP3 file, supports pause/resume/cancel, and atomically finalizes it.
 pub fn convert_to_mp3<F>(
     executable_path: impl AsRef<Path>,
     input_path: impl AsRef<Path>,
     output_path: impl AsRef<Path>,
     bitrate: &str,
+    on_progress: F,
+) -> Result<String, String>
+where F: FnMut(u64, Option<u64>) {
+    convert_to_mp3_controlled(executable_path, input_path, output_path, bitrate, DownloadControl::new(), on_progress)
+}
+
+/// Controlled conversion. Cancellation kills FFmpeg and removes the staged output.
+pub fn convert_to_mp3_controlled<F>(
+    executable_path: impl AsRef<Path>,
+    input_path: impl AsRef<Path>,
+    output_path: impl AsRef<Path>,
+    bitrate: &str,
+    control: DownloadControl,
     mut on_progress: F,
 ) -> Result<String, String>
-where
-    F: FnMut(u64, Option<u64>),
-{
+where F: FnMut(u64, Option<u64>) {
     let executable = executable_path.as_ref();
     validate_executable(executable)?;
     validate_bitrate(bitrate)?;
     let input = validate_input(input_path.as_ref())?;
     let output = validate_output(output_path.as_ref(), &input)?;
 
-    // FFmpeg prints the source duration while probing, usually with a non-zero
-    // status because no output was requested. That status is expected here.
-    let probe = Command::new(executable)
-        .args(["-hide_banner", "-i"])
-        .arg(&input)
-        .output()
+    let probe = Command::new(executable).args(["-hide_banner", "-i"]).arg(&input).output()
         .map_err(|error| format!("Could not probe input video: {error}"))?;
-    let probe_text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&probe.stdout),
-        String::from_utf8_lossy(&probe.stderr)
-    );
+    let probe_text = format!("{}\\n{}", String::from_utf8_lossy(&probe.stdout), String::from_utf8_lossy(&probe.stderr));
     let duration = parse_duration_millis(&probe_text);
 
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "System clock is before Unix epoch".to_string())?.as_nanos();
+    let stem = output.file_stem().and_then(|v| v.to_str()).ok_or_else(|| "MP3 output file name is invalid".to_string())?;
+    let staged = output.with_file_name(format!("{stem}.part-{nonce}.mp3"));
+
     let mut child = Command::new(executable)
-        .args([
-            "-nostdin", "-hide_banner", "-loglevel", "error", "-i",
-        ])
+        .args(["-n", "-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(&input)
-        .args([
-            "-vn", "-map", "0:a:0", "-codec:a", "libmp3lame",
-            "-b:a", bitrate, "-id3v2_version", "3",
-            "-progress", "pipe:1", "-nostats",
-        ])
-        .arg(&output)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .args(["-vn", "-map", "0:a:0", "-codec:a", "libmp3lame", "-b:a", bitrate,
+            "-id3v2_version", "3", "-progress", "pipe:1", "-nostats"])
+        .arg(&staged).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
         .map_err(|error| format!("Could not start FFmpeg conversion: {error}"))?;
 
-    let stderr = child.stderr.take()
-        .ok_or_else(|| "Could not capture FFmpeg diagnostics".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "Could not capture FFmpeg diagnostics".to_string())?;
     let stderr_reader = std::thread::spawn(move || {
         use std::io::Read;
         let mut text = String::new();
         let _ = std::io::BufReader::new(stderr).read_to_string(&mut text);
         text
     });
-
-    let stdout = child.stdout.take()
-        .ok_or_else(|| "Could not capture FFmpeg progress".to_string())?;
+    let stdout = child.stdout.take().ok_or_else(|| "Could not capture FFmpeg progress".to_string())?;
+    let mut task_error = None;
     {
         use std::io::{BufRead, BufReader};
-        let mut output_time = 0u64;
         for line in BufReader::new(stdout).lines() {
-            let line = line.map_err(|error| format!("Could not read FFmpeg progress: {error}"))?;
-            if let Some(value) = line.strip_prefix("out_time_us=")
-                .or_else(|| line.strip_prefix("out_time_ms="))
-            {
+            if let Err(error) = control.wait_until_running() {
+                task_error = Some(error);
+                let _ = child.kill();
+                break;
+            }
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    task_error = Some(format!("Could not read FFmpeg progress: {error}"));
+                    let _ = child.kill();
+                    break;
+                }
+            };
+            if let Some(value) = line.strip_prefix("out_time_us=").or_else(|| line.strip_prefix("out_time_ms=")) {
                 if let Ok(micros) = value.parse::<u64>() {
-                    output_time = micros / 1000;
-                    on_progress(output_time, duration);
+                    on_progress(micros / 1000, duration);
                 }
             }
         }
-        let _ = output_time;
     }
-
-    let status = child.wait()
-        .map_err(|error| format!("Could not wait for FFmpeg: {error}"))?;
+    let status = child.wait().map_err(|error| format!("Could not wait for FFmpeg: {error}"))?;
     let diagnostics = stderr_reader.join().unwrap_or_default();
+    if let Some(error) = task_error {
+        let _ = std::fs::remove_file(&staged);
+        return Err(error);
+    }
     if !status.success() {
-        let _ = std::fs::remove_file(&output);
+        let _ = std::fs::remove_file(&staged);
         let detail = diagnostics.trim();
         let detail = if detail.len() > 2048 { &detail[..2048] } else { detail };
-        return Err(if detail.is_empty() {
-            format!("FFmpeg conversion failed with status {status}")
-        } else {
-            format!("FFmpeg conversion failed: {detail}")
-        });
+        return Err(if detail.is_empty() { format!("FFmpeg conversion failed with status {status}") }
+            else { format!("FFmpeg conversion failed: {detail}") });
     }
-
-    let metadata = std::fs::symlink_metadata(&output)
-        .map_err(|error| format!("FFmpeg did not create the MP3 output: {error}"))?;
+    let metadata = std::fs::symlink_metadata(&staged)
+        .map_err(|error| format!("FFmpeg did not create the staged MP3 output: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
-        let _ = std::fs::remove_file(&output);
+        let _ = std::fs::remove_file(&staged);
         return Err("FFmpeg output is not a valid non-empty regular file".to_string());
     }
+    if output.exists() {
+        let _ = std::fs::remove_file(&staged);
+        return Err("MP3 output appeared during conversion; refusing to overwrite it".to_string());
+    }
+    std::fs::rename(&staged, &output).map_err(|error| {
+        let _ = std::fs::remove_file(&staged);
+        format!("Could not finalize MP3 output: {error}")
+    })?;
     Ok(output.to_string_lossy().into_owned())
 }
 
