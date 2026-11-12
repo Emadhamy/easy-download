@@ -407,6 +407,49 @@ pub fn ffmpeg_convert_to_mp3_controlled(
 }
 
 
+
+/// Downloads, verifies, extracts, probes, and installs the latest supported FFmpeg build.
+#[frb]
+pub fn ffmpeg_install_latest_release(
+    install_root: String,
+    sink: StreamSink<String>,
+) -> Result<String, String> {
+    let target = Target::current()
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))?;
+    let candidate = crate::ffmpeg_updates::fetch_latest_release(&target.key())?;
+    let installed = crate::ffmpeg_installer::install_release(
+        &candidate,
+        &target.key(),
+        install_root,
+        |phase, received, total| {
+            let event = serde_json::json!({
+                "phase": phase,
+                "received": received,
+                "total": total,
+            });
+            let _ = sink.add(event.to_string());
+        },
+    )?;
+    serde_json::to_string(&installed)
+        .map_err(|error| format!("Could not encode installed FFmpeg metadata: {error}"))
+}
+
+/// Returns the active managed FFmpeg installation after integrity and encoder checks.
+#[frb]
+pub fn ffmpeg_get_active_installation(install_root: String) -> Result<String, String> {
+    let active = crate::ffmpeg_installer::active_installation(install_root)?;
+    serde_json::to_string(&active)
+        .map_err(|error| format!("Could not encode active FFmpeg metadata: {error}"))
+}
+
+/// Restores the previous verified FFmpeg version without changing yt-dlp.
+#[frb]
+pub fn ffmpeg_rollback(install_root: String) -> Result<String, String> {
+    let active = crate::ffmpeg_installer::rollback(install_root)?;
+    serde_json::to_string(&active)
+        .map_err(|error| format!("Could not encode rolled-back FFmpeg metadata: {error}"))
+}
+
 /// Checks the latest BtbN FFmpeg release and verifies its published checksum entry.
 /// This discovery step does not download or execute the FFmpeg archive.
 #[frb]
