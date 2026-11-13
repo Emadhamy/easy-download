@@ -3,7 +3,8 @@
     <application
         android:label="Easy Download"
         android:name="${applicationName}"
->
+        android:extractNativeLibs="true"
+    >
         <activity
             android:name=".MainActivity"
             android:exported="true"
