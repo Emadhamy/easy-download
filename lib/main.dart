@@ -405,7 +405,6 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         } catch (_) {
           // Ignore non-JSON stream messages; the stream error channel reports failures.
         }
-      }
         }
       }
       await _refreshInstalledYtDlp();
