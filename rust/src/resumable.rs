@@ -289,11 +289,16 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::thread;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_DESTINATION_ID: AtomicU64 = AtomicU64::new(0);
 
     fn destination() -> std::path::PathBuf {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("easy-download-resume-{unique}.bin"))
+        let unique = NEXT_DESTINATION_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "easy-download-resume-{}-{unique}.bin",
+            std::process::id()
+        ))
     }
 
     fn read_request(stream: &mut TcpStream) -> String {
