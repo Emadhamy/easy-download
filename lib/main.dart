@@ -140,6 +140,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   static const _downloadDirectoryKey = 'easy_download_directory_v1';
   static const _androidDirectoryKey = 'easy_download_android_tree_uri_v1';
   static const _storageChannel = MethodChannel('com.easydownload/storage');
+  static const _ytDlpAndroidChannel = MethodChannel('com.easydownload/ytdlp_android');
   String? _downloadDirectoryPath;
   String? _androidDownloadTreeUri;
   static const int _maxConcurrentDownloads = 3;
@@ -200,6 +201,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   bool get _ytDlpSupported => Platform.isWindows || Platform.isLinux;
+  bool get _ytDlpManagerSupported => _ytDlpSupported || Platform.isAndroid;
 
   Future<String> _ytDlpInstallRoot() async {
     final support = await getApplicationSupportDirectory();
@@ -207,12 +209,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Future<void> _initializeYtDlpManager() async {
-    if (!_ytDlpSupported) {
-      if (mounted) {
-        setState(() => _ytDlpStatus = Platform.isAndroid
-            ? 'yt-dlp automatic installation is not available on Android yet.'
-            : 'yt-dlp is currently supported on Windows and Linux only.');
-      }
+    if (!_ytDlpManagerSupported) {
+      if (mounted) setState(() => _ytDlpStatus = 'yt-dlp is not supported on this platform.');
       return;
     }
 
@@ -224,7 +222,22 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       _ytDlpHistory = prefs.getStringList(_ytDlpHistoryKey) ?? [];
     });
 
-    await _refreshInstalledYtDlp();
+    if (Platform.isAndroid) {
+      try {
+        final runtime = await _ytDlpAndroidChannel.invokeMapMethod<String, dynamic>('initialize');
+        if (mounted) {
+          setState(() {
+            _ytDlpInstalledVersion = runtime?['version'] as String?;
+            _ytDlpStatus = 'Android yt-dlp runtime initialized. The official updater is ready.';
+          });
+        }
+      } catch (error) {
+        if (mounted) setState(() => _ytDlpStatus = 'Android yt-dlp initialization failed: $error');
+        return;
+      }
+    } else {
+      await _refreshInstalledYtDlp();
+    }
     if (_ytDlpAutoCheckEnabled) {
       await _checkYtDlpUpdates(silent: true);
       _scheduleYtDlpChecks();
@@ -235,7 +248,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   void _scheduleYtDlpChecks() {
     _ytDlpUpdateTimer?.cancel();
-    if (!_ytDlpSupported || !_ytDlpAutoCheckEnabled) return;
+    if (!_ytDlpManagerSupported || !_ytDlpAutoCheckEnabled) return;
     _ytDlpUpdateTimer = Timer.periodic(const Duration(hours: 24), (_) {
       unawaited(_checkYtDlpUpdates(silent: true));
     });
@@ -252,7 +265,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           : 'Automatic update checks are paused.';
     });
     _scheduleYtDlpChecks();
-    if (enabled && _ytDlpSupported) {
+    if (enabled && _ytDlpManagerSupported) {
       await _checkYtDlpUpdates(silent: true);
     }
   }
@@ -282,11 +295,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Future<void> _refreshInstalledYtDlp() async {
-    if (!_ytDlpSupported) return;
+    if (!_ytDlpManagerSupported) return;
     try {
-      final executable = await _installedYtDlpExecutable();
-      final version = await rust_api.ytDlpGetVersion(executablePath: executable);
-      if (mounted) setState(() => _ytDlpInstalledVersion = version.trim());
+      final version = Platform.isAndroid
+          ? await _ytDlpAndroidChannel.invokeMethod<String>('version')
+          : (await rust_api.ytDlpGetVersion(executablePath: await _installedYtDlpExecutable())).trim();
+      if (mounted) setState(() => _ytDlpInstalledVersion = version);
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -298,7 +312,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Future<void> _checkYtDlpUpdates({bool silent = false}) async {
-    if (!_ytDlpSupported || _ytDlpChecking || _ytDlpInstalling) return;
+    if (!_ytDlpManagerSupported || _ytDlpChecking || _ytDlpInstalling) return;
     if (mounted) {
       setState(() {
         _ytDlpChecking = true;
@@ -306,9 +320,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       });
     }
     try {
-      final raw = await rust_api.ytDlpCheckLatestRelease();
-      final release = jsonDecode(raw) as Map<String, dynamic>;
-      final latest = release['version'] as String?;
+      final String? latest;
+      if (Platform.isAndroid) {
+        final release = await _ytDlpAndroidChannel.invokeMapMethod<String, dynamic>('checkLatest');
+        latest = release?['latestVersion'] as String?;
+        final installed = release?['installedVersion'] as String?;
+        if (installed != null && installed.isNotEmpty) _ytDlpInstalledVersion = installed;
+      } else {
+        final raw = await rust_api.ytDlpCheckLatestRelease();
+        final release = jsonDecode(raw) as Map<String, dynamic>;
+        latest = release['version'] as String?;
+      }
       if (latest == null || latest.isEmpty) {
         throw const FormatException('The official release response has no version.');
       }
@@ -345,7 +367,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Future<void> _installLatestYtDlp() async {
-    if (!_ytDlpSupported || _ytDlpInstalling || _ytDlpChecking ||
+    if (!_ytDlpManagerSupported || _ytDlpInstalling || _ytDlpChecking ||
         _ytDlpLatestVersion == null) return;
     setState(() {
       _ytDlpInstalling = true;
@@ -354,8 +376,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       _ytDlpStatus = 'Downloading and verifying the official yt-dlp release...';
     });
     try {
-      final root = await _ytDlpInstallRoot();
-      await for (final raw in rust_api.ytDlpInstallLatestRelease(installRoot: root)) {
+      if (Platform.isAndroid) {
+        final update = await _ytDlpAndroidChannel.invokeMapMethod<String, dynamic>('updateStable');
+        await _refreshInstalledYtDlp();
+        final status = update?['status'] as String? ?? 'UPDATED';
+        if (mounted) setState(() => _ytDlpStatus = status == 'ALREADY_UP_TO_DATE'
+            ? 'Android yt-dlp is already up to date.'
+            : 'Android yt-dlp updated from the official stable release.');
+      } else {
+        final root = await _ytDlpInstallRoot();
+        await for (final raw in rust_api.ytDlpInstallLatestRelease(installRoot: root)) {
         try {
           final event = jsonDecode(raw) as Map<String, dynamic>;
           final phase = event['phase'] as String?;
@@ -374,6 +404,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           }
         } catch (_) {
           // Ignore non-JSON stream messages; the stream error channel reports failures.
+        }
+      }
         }
       }
       await _refreshInstalledYtDlp();
@@ -1037,7 +1069,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Widget _buildYtDlpManagerCard() {
-    final supported = _ytDlpSupported;
+    final supported = _ytDlpManagerSupported;
     final hasUpdate = _ytDlpLatestVersion != null &&
         _ytDlpLatestVersion != _ytDlpInstalledVersion;
     final progress = _ytDlpTotalBytes != null && _ytDlpTotalBytes! > 0
