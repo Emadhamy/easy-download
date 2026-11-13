@@ -9,6 +9,9 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import org.json.JSONObject
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
@@ -114,6 +117,33 @@ class MainActivity : FlutterActivity() {
                             runOnUiThread {
                                 result.error("YTDLP_ANDROID_VERSION_FAILED", error.message, null)
                             }
+                        }
+                    }
+                    "checkLatest" -> ytDlpExecutor.execute {
+                        var connection: HttpURLConnection? = null
+                        try {
+                            YoutubeDL.getInstance().init(applicationContext)
+                            connection = (URL("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+                                .openConnection() as HttpURLConnection).apply {
+                                requestMethod = "GET"
+                                connectTimeout = 15000
+                                readTimeout = 15000
+                                setRequestProperty("Accept", "application/vnd.github+json")
+                                setRequestProperty("User-Agent", "Easy-Download-Android")
+                            }
+                            val payload = connection.inputStream.bufferedReader().use { it.readText() }
+                            val latest = JSONObject(payload).optString("tag_name")
+                            if (latest.isBlank()) throw IllegalStateException("The official release did not include a version tag.")
+                            val installed = YoutubeDL.getInstance().version(applicationContext)
+                            runOnUiThread {
+                                result.success(mapOf("latestVersion" to latest, "installedVersion" to installed))
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error("YTDLP_ANDROID_CHECK_FAILED", error.message, null)
+                            }
+                        } finally {
+                            connection?.disconnect()
                         }
                     }
                     "updateStable" -> ytDlpExecutor.execute {
