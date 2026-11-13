@@ -17,34 +17,33 @@ abstract final class EasyDownloadPalette {
 
 abstract final class EasyDownloadTheme {
   static ThemeData get dark {
-    const palette = EasyDownloadPalette;
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      scaffoldBackgroundColor: palette.background,
+      scaffoldBackgroundColor: EasyDownloadPalette.background,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: palette.accent,
+        seedColor: EasyDownloadPalette.accent,
         brightness: Brightness.dark,
-        surface: palette.surface,
-        primary: palette.accent,
+        surface: EasyDownloadPalette.surface,
+        primary: EasyDownloadPalette.accent,
         onPrimary: const Color(0xFF17110D),
-        secondary: palette.accentSoft,
-        onSurface: palette.foreground,
-        error: palette.danger,
+        secondary: EasyDownloadPalette.accentSoft,
+        onSurface: EasyDownloadPalette.foreground,
+        error: EasyDownloadPalette.danger,
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: palette.background,
-        foregroundColor: palette.foreground,
+        backgroundColor: EasyDownloadPalette.background,
+        foregroundColor: EasyDownloadPalette.foreground,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: palette.accent,
+        backgroundColor: EasyDownloadPalette.accent,
         foregroundColor: Color(0xFF17110D),
       ),
       snackBarTheme: const SnackBarThemeData(
-        backgroundColor: palette.elevatedSurface,
-        contentTextStyle: TextStyle(color: palette.foreground),
+        backgroundColor: EasyDownloadPalette.elevatedSurface,
+        contentTextStyle: TextStyle(color: EasyDownloadPalette.foreground),
       ),
     );
   }
