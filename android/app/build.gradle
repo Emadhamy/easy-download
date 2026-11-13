@@ -17,7 +17,8 @@ android {
 
     defaultConfig {
         applicationId "com.easydownload.app"
-        minSdk flutter.minSdkVersion
+        // youtubedl-android requires Android API 24 or newer.
+        minSdk 24
         targetSdk flutter.targetSdkVersion
         versionCode flutter.versionCode
         versionName flutter.versionName
@@ -27,6 +28,7 @@ android {
 
 dependencies {
     implementation "androidx.documentfile:documentfile:1.0.1"
+    implementation "io.github.junkfood02.youtubedl-android:library:0.18.1"
 }
 
 flutter { source "../.." }
