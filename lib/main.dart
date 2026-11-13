@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'src/utils/download_helpers.dart';
+import 'src/storage/download_history_store.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -137,6 +138,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   final Set<_LinkDraft> _selectedLinks = {};
   bool _selectionMode = false;
   static const _historyKey = 'easy_download_history_v1';
+  DownloadHistoryStore? _historyStore;
+
+  Future<DownloadHistoryStore> _getHistoryStore() async {
+    final existing = _historyStore;
+    if (existing != null) return existing;
+    final support = await getApplicationSupportDirectory();
+    return _historyStore ??= DownloadHistoryStore(File(
+      '${support.path}${Platform.pathSeparator}download-history-v2.json',
+    ));
+  }
   static const _downloadDirectoryKey = 'easy_download_directory_v1';
   static const _androidDirectoryKey = 'easy_download_android_tree_uri_v1';
   static const _storageChannel = MethodChannel('com.easydownload/storage');
@@ -1188,15 +1199,24 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<void> _loadHistory() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_historyKey);
+    final store = await _getHistoryStore();
+    final storedEntries = await store.load();
+    final legacyRaw = prefs.getString(_historyKey);
     if (!mounted) return;
+
     setState(() {
       _downloadDirectoryPath = prefs.getString(_downloadDirectoryKey);
       _androidDownloadTreeUri = prefs.getString(_androidDirectoryKey);
     });
-    if (raw == null) return;
+
     try {
-      final entries = jsonDecode(raw) as List<dynamic>;
+      List<dynamic>? entries = storedEntries;
+      if (entries == null && legacyRaw != null) {
+        final decoded = jsonDecode(legacyRaw);
+        if (decoded is List) entries = decoded;
+      }
+      if (entries == null) return;
+
       final restored = entries
           .whereType<Map<String, dynamic>>()
           .map(_LinkDraft.fromJson)
@@ -1206,7 +1226,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         _links
           ..clear()
           ..addAll(restored);
-        // A running task cannot survive an app restart; restore it as queued.
+        // A running task cannot survive an app restart. Its partial file and
+        // byte count are retained so the user can safely resume it.
         for (final link in _links) {
           link.isDownloading = false;
           link.isPaused = false;
@@ -1214,15 +1235,18 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           link.speedBytesPerSecond = 0;
         }
       });
+
+      // Migrate the old SharedPreferences snapshot to the crash-resilient
+      // file store, then persist the normalized recovered state.
       await _saveHistory();
     } catch (_) {
-      // Keep the app usable if local history is invalid.
+      // Keep the app usable if local history is invalid or unreadable.
     }
   }
 
   Future<void> _saveHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_historyKey, jsonEncode(_links.map((item) => item.toJson()).toList()));
+    final store = await _getHistoryStore();
+    await store.save(_links.map((item) => item.toJson()).toList());
   }
 
   Future<void> _exportDownloadList() async {
