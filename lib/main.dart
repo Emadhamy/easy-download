@@ -160,6 +160,18 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   List<String> _ytDlpHistory = [];
 
   static const _ffmpegExecutableKey = 'easy_download_ffmpeg_executable_v1';
+  static const _ffmpegAutoCheckKey = 'easy_download_ffmpeg_auto_check_v1';
+  static const _ffmpegLastCheckKey = 'easy_download_ffmpeg_last_check_v1';
+  static const _ffmpegHistoryKey = 'easy_download_ffmpeg_history_v1';
+  Timer? _ffmpegUpdateTimer;
+  bool _ffmpegAutoCheckEnabled = true;
+  bool _ffmpegChecking = false;
+  bool _ffmpegInstalling = false;
+  String? _ffmpegLatestVersion;
+  String? _ffmpegLastCheckedAt;
+  int _ffmpegReceivedBytes = 0;
+  int? _ffmpegTotalBytes;
+  List<String> _ffmpegHistory = [];
   String? _ffmpegExecutablePath;
   String? _ffmpegVersion;
   String? _ffmpegInputPath;
@@ -183,6 +195,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   @override
   void dispose() {
     _ytDlpUpdateTimer?.cancel();
+    _ffmpegUpdateTimer?.cancel();
     super.dispose();
   }
 
@@ -391,24 +404,226 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   bool get _ffmpegSupported => Platform.isWindows || Platform.isLinux;
 
+  Future<String> _ffmpegInstallRoot() async {
+    final support = await getApplicationSupportDirectory();
+    return '${support.path}${Platform.pathSeparator}managed-tools${Platform.pathSeparator}ffmpeg';
+  }
+
   Future<void> _initializeFfmpegManager() async {
     if (!_ffmpegSupported) {
       if (mounted) {
         setState(() => _ffmpegStatus =
-            'FFmpeg conversion is currently available on Windows and Linux only.');
+            'FFmpeg managed installation and conversion are available on Windows and Linux only.');
       }
       return;
     }
     final prefs = await SharedPreferences.getInstance();
-    final savedPath = prefs.getString(_ffmpegExecutableKey);
-    if (savedPath == null || savedPath.isEmpty) {
-      if (mounted) setState(() => _ffmpegStatus = 'FFmpeg is not configured yet.');
-      return;
+    if (!mounted) return;
+    setState(() {
+      _ffmpegAutoCheckEnabled = prefs.getBool(_ffmpegAutoCheckKey) ?? true;
+      _ffmpegLastCheckedAt = prefs.getString(_ffmpegLastCheckKey);
+      _ffmpegHistory = prefs.getStringList(_ffmpegHistoryKey) ?? [];
+    });
+
+    var managedInstalled = false;
+    try {
+      await _refreshManagedFfmpeg();
+      managedInstalled = _ffmpegExecutablePath != null;
+    } catch (_) {
+      // Fall back to a previously selected executable if no managed version exists.
+    }
+    if (!managedInstalled) {
+      final savedPath = prefs.getString(_ffmpegExecutableKey);
+      if (savedPath != null && savedPath.isNotEmpty) {
+        try {
+          await _verifyFfmpegExecutable(savedPath, persist: false);
+        } catch (_) {
+          // The manager card displays the verification error.
+        }
+      } else if (mounted) {
+        setState(() => _ffmpegStatus = 'FFmpeg is not installed yet. Check for an official update to install it.');
+      }
+    }
+
+    if (_ffmpegAutoCheckEnabled) {
+      await _checkFfmpegUpdates(silent: true);
+      _scheduleFfmpegChecks();
+    } else if (mounted) {
+      setState(() => _ffmpegStatus = 'Automatic FFmpeg update checks are paused.');
+    }
+  }
+
+  void _scheduleFfmpegChecks() {
+    _ffmpegUpdateTimer?.cancel();
+    if (!_ffmpegSupported || !_ffmpegAutoCheckEnabled) return;
+    _ffmpegUpdateTimer = Timer.periodic(const Duration(hours: 24), (_) {
+      unawaited(_checkFfmpegUpdates(silent: true));
+    });
+  }
+
+  Future<void> _setFfmpegAutoCheck(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_ffmpegAutoCheckKey, enabled);
+    if (!mounted) return;
+    setState(() {
+      _ffmpegAutoCheckEnabled = enabled;
+      _ffmpegStatus = enabled
+          ? 'Automatic FFmpeg checks enabled (every 24 hours while the app is open).'
+          : 'Automatic FFmpeg update checks are paused.';
+    });
+    _scheduleFfmpegChecks();
+    if (enabled && _ffmpegSupported) {
+      await _checkFfmpegUpdates(silent: true);
+    }
+  }
+
+  Future<void> _refreshManagedFfmpeg() async {
+    final root = await _ffmpegInstallRoot();
+    final raw = await rust_api.ffmpegGetActiveInstallation(installRoot: root);
+    final active = jsonDecode(raw) as Map<String, dynamic>;
+    final relative = active['executablePath'] as String?;
+    final version = active['version'] as String?;
+    if (relative == null || version == null || version.isEmpty) {
+      throw const FormatException('The active FFmpeg installation metadata is incomplete.');
+    }
+    final segments = relative.split('/');
+    if (segments.length < 3 || segments.first != 'versions' ||
+        segments.any((part) => part.isEmpty || part == '.' || part == '..')) {
+      throw const FormatException('The active FFmpeg executable path is unsafe.');
+    }
+    final executable = '$root${Platform.pathSeparator}${segments.join(Platform.pathSeparator)}';
+    if (!await File(executable).exists()) {
+      throw StateError('The active managed FFmpeg executable is missing.');
+    }
+    if (!mounted) return;
+    setState(() {
+      _ffmpegExecutablePath = executable;
+      _ffmpegVersion = version;
+      _ffmpegStatus = 'Managed FFmpeg $version is verified and ready.';
+    });
+  }
+
+  Future<void> _checkFfmpegUpdates({bool silent = false}) async {
+    if (!_ffmpegSupported || _ffmpegChecking || _ffmpegInstalling) return;
+    if (mounted) {
+      setState(() {
+        _ffmpegChecking = true;
+        _ffmpegStatus = 'Checking the official BtbN FFmpeg release and checksum...';
+      });
     }
     try {
-      await _verifyFfmpegExecutable(savedPath, persist: false);
-    } catch (_) {
-      // The manager card displays the verification error.
+      final raw = await rust_api.ffmpegCheckLatestRelease();
+      final release = jsonDecode(raw) as Map<String, dynamic>;
+      final latest = release['version'] as String?;
+      if (latest == null || latest.isEmpty) {
+        throw const FormatException('The official FFmpeg release response has no version.');
+      }
+      final checkedAt = DateTime.now().toIso8601String();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_ffmpegLastCheckKey, checkedAt);
+      if (!mounted) return;
+      setState(() {
+        _ffmpegLatestVersion = latest;
+        _ffmpegLastCheckedAt = checkedAt;
+        _ffmpegStatus = _ffmpegVersion == latest
+            ? 'FFmpeg is up to date.'
+            : 'A verified FFmpeg update is available.';
+      });
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_ffmpegVersion == latest
+              ? 'FFmpeg is already up to date.'
+              : 'FFmpeg $latest is available.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _ffmpegStatus = 'FFmpeg update check failed: $error');
+        if (!silent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not check FFmpeg updates: $error')),
+          );
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _ffmpegChecking = false);
+    }
+  }
+
+  Future<void> _installLatestFfmpeg() async {
+    if (!_ffmpegSupported || _ffmpegInstalling || _ffmpegChecking ||
+        _ffmpegLatestVersion == null || _ffmpegConverting) return;
+    setState(() {
+      _ffmpegInstalling = true;
+      _ffmpegReceivedBytes = 0;
+      _ffmpegTotalBytes = null;
+      _ffmpegStatus = 'Downloading and verifying the official FFmpeg build...';
+    });
+    try {
+      final root = await _ffmpegInstallRoot();
+      await for (final raw in rust_api.ffmpegInstallLatestRelease(installRoot: root)) {
+        try {
+          final event = jsonDecode(raw) as Map<String, dynamic>;
+          final phase = event['phase'] as String? ?? 'installing';
+          if (mounted) {
+            setState(() {
+              _ffmpegReceivedBytes = (event['received'] as num?)?.toInt() ?? _ffmpegReceivedBytes;
+              _ffmpegTotalBytes = (event['total'] as num?)?.toInt() ?? _ffmpegTotalBytes;
+              _ffmpegStatus = switch (phase) {
+                'downloading' => 'Downloading FFmpeg archive...',
+                'verifying' => 'Verifying FFmpeg SHA-256 checksum...',
+                'extracting' => 'Safely extracting FFmpeg...',
+                'probing' => 'Checking FFmpeg version and MP3 encoder...',
+                'installed' => 'FFmpeg installed and verified.',
+                _ => 'Installing FFmpeg ($phase)...',
+              };
+            });
+          }
+        } catch (_) {
+          // The bridge error channel reports stream failures.
+        }
+      }
+      await _refreshManagedFfmpeg();
+      final version = _ffmpegVersion ?? _ffmpegLatestVersion ?? 'latest';
+      final entry = '${DateTime.now().toLocal().toString().substring(0, 16)} — Installed FFmpeg $version';
+      final prefs = await SharedPreferences.getInstance();
+      final history = [entry, ..._ffmpegHistory].take(10).toList();
+      await prefs.setStringList(_ffmpegHistoryKey, history);
+      if (!mounted) return;
+      setState(() {
+        _ffmpegHistory = history;
+        _ffmpegStatus = 'FFmpeg $version installed and verified.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('FFmpeg $version installed successfully.')),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _ffmpegStatus = 'FFmpeg installation failed; the previous active version was preserved: $error');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('FFmpeg installation failed: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _ffmpegInstalling = false);
+    }
+  }
+
+  Future<void> _rollbackFfmpeg() async {
+    if (!_ffmpegSupported || _ffmpegInstalling || _ffmpegConverting) return;
+    try {
+      if (mounted) setState(() => _ffmpegStatus = 'Validating and restoring the previous FFmpeg version...');
+      final root = await _ffmpegInstallRoot();
+      await rust_api.ffmpegRollback(installRoot: root);
+      await _refreshManagedFfmpeg();
+      if (mounted) {
+        setState(() => _ffmpegStatus = 'Previous FFmpeg version restored and verified.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Previous FFmpeg version restored.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _ffmpegStatus = 'FFmpeg rollback unavailable or failed: $error');
     }
   }
 
@@ -643,7 +858,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               ],
             ),
             const SizedBox(height: 12),
-            Text('Installed: ' + (_ffmpegVersion ?? 'Not verified')),
+            Text('Installed: ' + (_ffmpegVersion ?? 'Not installed')),
+            Text('Latest official: ${_ffmpegLatestVersion ?? 'Not checked'}'),
+            Text(
+              'Last check: ${_ffmpegLastCheckedAt == null ? 'Not checked yet' : (DateTime.tryParse(_ffmpegLastCheckedAt!)?.toLocal().toString().substring(0, 16) ?? 'Unknown')}',
+              style: const TextStyle(color: Color(0xFF9A9AAF), fontSize: 12),
+            ),
             if (_ffmpegExecutablePath != null) ...[
               const SizedBox(height: 4),
               Text(_ffmpegExecutablePath!,
@@ -653,6 +873,21 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             ],
             const SizedBox(height: 10),
             Text(_ffmpegStatus, style: const TextStyle(color: Color(0xFFBDBDCE))),
+            if (_ffmpegInstalling) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(
+                value: _ffmpegTotalBytes != null && _ffmpegTotalBytes! > 0
+                    ? (_ffmpegReceivedBytes / _ffmpegTotalBytes!).clamp(0.0, 1.0).toDouble()
+                    : null,
+              ),
+              const SizedBox(height: 5),
+              Text(
+                _ffmpegTotalBytes == null
+                    ? _formatYtDlpBytes(_ffmpegReceivedBytes)
+                    : '${_formatYtDlpBytes(_ffmpegReceivedBytes)} / ${_formatYtDlpBytes(_ffmpegTotalBytes!)}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AAF)),
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -662,6 +897,31 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   onPressed: supported && !_ffmpegConverting ? _chooseFfmpegExecutable : null,
                   icon: const Icon(Icons.folder_open_rounded),
                   label: Text(_ffmpegVersion == null ? 'Choose FFmpeg' : 'Change FFmpeg'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: supported && !_ffmpegConverting && !_ffmpegChecking && !_ffmpegInstalling
+                      ? () => _checkFfmpegUpdates()
+                      : null,
+                  icon: _ffmpegChecking
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.refresh_rounded),
+                  label: const Text('Check updates'),
+                ),
+                FilledButton.icon(
+                  onPressed: supported && !_ffmpegConverting && !_ffmpegChecking &&
+                          !_ffmpegInstalling && _ffmpegLatestVersion != null &&
+                          _ffmpegLatestVersion != _ffmpegVersion
+                      ? _installLatestFfmpeg
+                      : null,
+                  icon: const Icon(Icons.system_update_alt_rounded),
+                  label: Text(_ffmpegInstalling ? 'Updating...' : 'Install / Update'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: supported && !_ffmpegConverting && !_ffmpegInstalling
+                      ? _rollbackFfmpeg
+                      : null,
+                  icon: const Icon(Icons.history_rounded),
+                  label: const Text('Rollback'),
                 ),
                 OutlinedButton.icon(
                   onPressed: supported && !_ffmpegConverting && _ffmpegExecutablePath != null
@@ -739,18 +999,31 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                   ),
               ],
             ),
+            if (supported) ...[
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Automatic update checks'),
+                subtitle: const Text('Check the official release every 24 hours while Easy Download is open.'),
+                value: _ffmpegAutoCheckEnabled,
+                onChanged: !_ffmpegInstalling && !_ffmpegChecking ? _setFfmpegAutoCheck : null,
+              ),
+              if (_ffmpegHistory.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                const Text('Recent FFmpeg updates', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                ..._ffmpegHistory.take(3).map((entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(entry, style: const TextStyle(fontSize: 11, color: Color(0xFF9A9AAF))),
+                )),
+              ],
+            ],
             if (!supported) ...[
               const SizedBox(height: 8),
               const Text(
-                'FFmpeg conversion is disabled on Android until a compatible, verified runtime is provided.',
+                'FFmpeg managed installation and conversion are disabled on Android until a compatible, verified runtime is provided.',
                 style: TextStyle(fontSize: 12, color: Color(0xFFFFB86B)),
               ),
             ],
-            const SizedBox(height: 8),
-            const Text(
-              'FFmpeg currently uses a separately selected executable. Its independent automatic updater will be added in the next manager step.',
-              style: TextStyle(fontSize: 11, color: Color(0xFF9A9AAF)),
-            ),
           ],
         ),
       ),
