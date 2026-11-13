@@ -2856,7 +2856,7 @@ class _StatCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: const EasyDownloadPalette.accent, size: 22),
+            Icon(icon, color: EasyDownloadPalette.accent, size: 22),
             const SizedBox(height: 18),
             Text(value,
                 style:
@@ -2886,7 +2886,7 @@ class _EmptyState extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: const EasyDownloadPalette.accent.withValues(alpha: 0.14),
+                color: EasyDownloadPalette.accent.withValues(alpha: 0.14),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.download_for_offline_outlined,
