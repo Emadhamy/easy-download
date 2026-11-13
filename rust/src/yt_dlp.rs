@@ -2,7 +2,36 @@
 //! This step inspects a source only; it does not download media or choose formats.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command, Output};
+
+/// Retry the Linux ETXTBSY race that can occur briefly while a managed
+/// executable is being published or activated. Other spawn errors are final.
+fn spawn_with_retry(command: &mut Command) -> std::io::Result<Child> {
+    for attempt in 0..=5 {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.raw_os_error() == Some(26) && attempt < 5 => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the retry loop always returns or exits")
+}
+
+/// Same transient-executable protection for commands whose output is captured.
+fn output_with_retry(command: &mut Command) -> std::io::Result<Output> {
+    for attempt in 0..=5 {
+        match command.output() {
+            Ok(output) => return Ok(output),
+            Err(error) if error.raw_os_error() == Some(26) && attempt < 5 => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the retry loop always returns or exits")
+}
 use url::Url;
 
 fn validate_source_url(input: &str) -> Result<String, String> {
@@ -44,20 +73,10 @@ fn validate_executable(path: &Path) -> Result<(), String> {
 pub fn get_version(executable_path: impl AsRef<Path>) -> Result<String, String> {
     let executable_path = executable_path.as_ref();
     validate_executable(executable_path)?;
-    // Linux can transiently return ETXTBSY when a freshly published executable
-    // is observed during filesystem metadata propagation. Retry only that
-    // specific transient error; all other spawn failures are returned immediately.
-    let mut attempt = 0;
-    let output = loop {
-        match Command::new(executable_path).arg("--version").output() {
-            Ok(output) => break output,
-            Err(error) if error.raw_os_error() == Some(26) && attempt < 5 => {
-                attempt += 1;
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            Err(error) => return Err(format!("Could not start yt-dlp: {error}")),
-        }
-    };
+    let mut command = Command::new(executable_path);
+    command.arg("--version");
+    let output = output_with_retry(&mut command)
+        .map_err(|error| format!("Could not start yt-dlp: {error}"))?;
     if !output.status.success() {
         return Err(format!(
             "yt-dlp version probe failed: {}",
@@ -110,19 +129,19 @@ pub fn resolve_format_request(
         return Err("Invalid yt-dlp format identifier".to_string());
     }
 
-    let output = Command::new(executable_path)
-        .args([
-            "--ignore-config",
-            "--no-warnings",
-            "--no-playlist",
-            "--skip-download",
-            "--dump-single-json",
-            "--format",
-            format_id,
-            "--",
-            source_url.as_str(),
-        ])
-        .output()
+    let mut command = Command::new(executable_path);
+    command.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--no-playlist",
+        "--skip-download",
+        "--dump-single-json",
+        "--format",
+        format_id,
+        "--",
+        source_url.as_str(),
+    ]);
+    let output = output_with_retry(&mut command)
         .map_err(|error| format!("Could not start yt-dlp format resolver: {error}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
@@ -190,27 +209,27 @@ where
 
     use std::io::{BufRead, BufReader, Read};
     use std::process::{Stdio, Command};
-    let mut child = Command::new(executable_path)
-        .args([
-            "--ignore-config",
-            "--no-warnings",
-            "--no-playlist",
-            "--newline",
-            "--progress",
-            "--progress-template",
-            "download:ED_PROGRESS:%(progress.downloaded_bytes)s:%(progress.total_bytes_estimate)s",
-            "--format",
-            format_id,
-            "--output",
-            output_template,
-            "--print",
-            "after_move:ED_FILE:%(filepath)s",
-            "--",
-            source_url.as_str(),
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    let mut command = Command::new(executable_path);
+    command.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--no-playlist",
+        "--newline",
+        "--progress",
+        "--progress-template",
+        "download:ED_PROGRESS:%(progress.downloaded_bytes)s:%(progress.total_bytes_estimate)s",
+        "--format",
+        format_id,
+        "--output",
+        output_template,
+        "--print",
+        "after_move:ED_FILE:%(filepath)s",
+        "--",
+        source_url.as_str(),
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    let mut child = spawn_with_retry(&mut command)
         .map_err(|error| format!("Could not start yt-dlp download: {error}"))?;
 
     let stderr = child.stderr.take()
@@ -270,17 +289,17 @@ pub fn inspect_source(
     let source_url = validate_source_url(source_url)?;
     let executable_path = executable_path.as_ref();
     validate_executable(executable_path)?;
-    let output = Command::new(executable_path)
-        .args([
-            "--ignore-config",
-            "--no-warnings",
-            "--no-playlist",
-            "--skip-download",
-            "--dump-single-json",
-            "--",
-            source_url.as_str(),
-        ])
-        .output()
+    let mut command = Command::new(executable_path);
+    command.args([
+        "--ignore-config",
+        "--no-warnings",
+        "--no-playlist",
+        "--skip-download",
+        "--dump-single-json",
+        "--",
+        source_url.as_str(),
+    ]);
+    let output = output_with_retry(&mut command)
         .map_err(|error| format!("Could not start yt-dlp: {error}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
