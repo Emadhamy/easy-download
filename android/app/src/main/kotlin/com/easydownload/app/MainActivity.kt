@@ -4,15 +4,19 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
+import com.yausername.youtubedl_android.YoutubeDL
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private val storageChannel = "com.easydownload/storage"
+    private val ytDlpAndroidChannel = "com.easydownload/ytdlp_android"
     private val pickDirectoryRequestCode = 9401
     private var pendingDirectoryResult: MethodChannel.Result? = null
+    private val ytDlpExecutor = Executors.newSingleThreadExecutor()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -82,6 +86,62 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "initialize" -> ytDlpExecutor.execute {
+                        try {
+                            YoutubeDL.getInstance().init(applicationContext)
+                            val version = YoutubeDL.getInstance().versionName(applicationContext)
+                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            runOnUiThread {
+                                result.success(mapOf("initialized" to true, "version" to version))
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error("YTDLP_ANDROID_INIT_FAILED", error.message, null)
+                            }
+                        }
+                    }
+                    "version" -> ytDlpExecutor.execute {
+                        try {
+                            YoutubeDL.getInstance().init(applicationContext)
+                            val version = YoutubeDL.getInstance().versionName(applicationContext)
+                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            runOnUiThread { result.success(version) }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error("YTDLP_ANDROID_VERSION_FAILED", error.message, null)
+                            }
+                        }
+                    }
+                    "updateStable" -> ytDlpExecutor.execute {
+                        try {
+                            YoutubeDL.getInstance().init(applicationContext)
+                            val status = YoutubeDL.getInstance().updateYoutubeDL(
+                                applicationContext,
+                                YoutubeDL.UpdateChannel.STABLE
+                            )
+                            val version = YoutubeDL.getInstance().versionName(applicationContext)
+                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            runOnUiThread {
+                                result.success(
+                                    mapOf(
+                                        "status" to status?.name,
+                                        "version" to version
+                                    )
+                                )
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error("YTDLP_ANDROID_UPDATE_FAILED", error.message, null)
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     @Deprecated("Deprecated in Android")
@@ -103,5 +163,10 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             callback.error("PERMISSION_FAILED", error.message, null)
         }
+    }
+
+    override fun onDestroy() {
+        ytDlpExecutor.shutdown()
+        super.onDestroy()
     }
 }
