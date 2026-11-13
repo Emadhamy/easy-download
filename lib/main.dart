@@ -52,6 +52,29 @@ IconData _downloadIconForName(String name) {
   return Icons.insert_drive_file_outlined;
 }
 
+Color _downloadAccentForName(String name) {
+  switch (_fileType(name)) {
+    case 'Video':
+      return EasyDownloadPalette.accent;
+    case 'Audio':
+      return EasyDownloadPalette.accentSoft;
+    case 'Images':
+      return const Color(0xFF73B7FF);
+    case 'Archives':
+      return const Color(0xFFB69AFF);
+    case 'Documents':
+      return const Color(0xFF80C9B0);
+    default:
+      return EasyDownloadPalette.muted;
+  }
+}
+
+String _downloadTypeLabel(String name) {
+  final extension = name.contains('.') ? name.split('.').last.toUpperCase() : '';
+  if (extension.isEmpty || extension.length > 5) return _fileType(name).toUpperCase();
+  return extension;
+}
+
 class _LinkDraft {
   _LinkDraft({required this.url, required this.fileName});
   final Uri url;
@@ -2561,24 +2584,59 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                         }),
                               )
                             : Container(
-                          width: 46,
-                          height: 46,
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
-                            color: violet.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(14),
+                            color: _downloadAccentForName(link.fileName)
+                                .withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: _downloadAccentForName(link.fileName)
+                                  .withValues(alpha: 0.28),
+                            ),
                           ),
-                          child: Icon(_downloadIconForName(link.fileName),
-                              color: violet),
+                          child: Icon(
+                            _downloadIconForName(link.fileName),
+                            color: _downloadAccentForName(link.fileName),
+                            size: 25,
+                          ),
                         ),
                         title: InkWell(
                           onLongPress: () => _renameDownload(link),
                           onTap: () => _showDownloadDetails(link),
                           borderRadius: BorderRadius.circular(4),
-                          child: Text(
-                            link.fileName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                link.fileName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _downloadAccentForName(link.fileName)
+                                      .withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  _downloadTypeLabel(link.fileName),
+                                  style: TextStyle(
+                                    color: _downloadAccentForName(link.fileName),
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.7,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         subtitle: Padding(
