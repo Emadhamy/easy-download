@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'src/utils/download_helpers.dart';
 import 'src/storage/download_history_store.dart';
+import 'src/theme/easy_download_theme.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -22,23 +23,10 @@ class EasyDownloadApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const background = Color(0xFF0B0B14);
-    const panel = Color(0xFF151525);
-    const violet = Color(0xFF8B5CF6);
-
     return MaterialApp(
       title: 'Easy Download',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: background,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: violet,
-          brightness: Brightness.dark,
-          surface: panel,
-        ),
-      ),
+      theme: EasyDownloadTheme.dark,
       home: const DownloadHomePage(),
     );
   }
@@ -1097,7 +1085,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           children: [
             Row(
               children: [
-                const Icon(Icons.video_library_outlined, color: Color(0xFF8B5CF6), size: 25),
+                const Icon(Icons.video_library_outlined, color: EasyDownloadPalette.accent, size: 25),
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Text('yt-dlp manager',
@@ -2178,7 +2166,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    const violet = Color(0xFF8B5CF6);
+    const violet = EasyDownloadPalette.accent;
     const muted = Color(0xFF9A9AAF);
     const panel = Color(0xFF151525);
     final queuedCount = _links.where((link) =>
@@ -2249,7 +2237,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF29204A), Color(0xFF171727)],
+                  colors: [Color(0xFF3A2418), Color(0xFF202020)],
                 ),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: violet.withValues(alpha: 0.25)),
@@ -2267,7 +2255,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                     child: const Text(
                       'DOWNLOAD MANAGER',
                       style: TextStyle(
-                        color: Color(0xFFD4C5FF),
+                        color: Color(0xFFFFD3AD),
                         fontSize: 10,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w800,
@@ -2650,7 +2638,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                           Text(
                                             'Queue position: #${_queuePosition(link)}',
                                             style: const TextStyle(
-                                              color: Color(0xFFD4C5FF),
+                                              color: Color(0xFFFFD3AD),
                                               fontSize: 11,
                                               fontWeight: FontWeight.w700,
                                             ),
@@ -2868,7 +2856,7 @@ class _StatCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: const Color(0xFF8B5CF6), size: 22),
+            Icon(icon, color: const EasyDownloadPalette.accent, size: 22),
             const SizedBox(height: 18),
             Text(value,
                 style:
@@ -2898,11 +2886,11 @@ class _EmptyState extends StatelessWidget {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: const Color(0xFF8B5CF6).withValues(alpha: 0.14),
+                color: const EasyDownloadPalette.accent.withValues(alpha: 0.14),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.download_for_offline_outlined,
-                  size: 32, color: Color(0xFF8B5CF6)),
+                  size: 32, color: EasyDownloadPalette.accent),
             ),
             const SizedBox(height: 14),
             const Text('Nothing downloading yet',
