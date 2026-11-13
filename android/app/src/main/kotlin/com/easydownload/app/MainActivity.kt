@@ -52,18 +52,19 @@ class MainActivity : FlutterActivity() {
                             result.error("INVALID_ARGUMENT", "Folder, source path, and file name are required.", null)
                             return@setMethodCallHandler
                         }
+                        val safeFileName = requireNotNull(fileName)
                         try {
                             val source = File(sourcePath)
                             if (!source.isFile) throw IllegalStateException("The completed temporary file was not found.")
                             val directory = DocumentFile.fromTreeUri(this, Uri.parse(treeUri))
                                 ?: throw IllegalStateException("The selected folder is no longer available.")
                             if (!directory.canWrite()) throw IllegalStateException("The selected folder is not writable.")
-                            val extension = fileName.substringAfterLast('.', "")
+                            val extension = safeFileName.substringAfterLast('.', "")
                             val mimeType = MimeTypeMap.getSingleton()
                                 .getMimeTypeFromExtension(extension.lowercase()) ?: "application/octet-stream"
-                            val base = fileName.substringBeforeLast('.', fileName)
+                            val base = safeFileName.substringBeforeLast('.', fileName)
                             val suffix = if (extension.isEmpty()) "" else ".$extension"
-                            var candidate = fileName
+                            var candidate = safeFileName
                             var index = 1
                             while (directory.findFile(candidate) != null) {
                                 candidate = "$base ($index)$suffix"
