@@ -129,8 +129,8 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
-            .setMethodCallHandler { call, result ->
+        val ytDlpMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
+        ytDlpMethodChannel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "cancelDownload" -> {
                         val taskId = call.argument<String>("taskId")
@@ -226,8 +226,7 @@ class MainActivity : FlutterActivity() {
                             }
                             YoutubeDL.getInstance().execute(request, taskId, true) { percent, etaSeconds, line ->
                                 runOnUiThread {
-                                    MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
-                                        .invokeMethod(
+                                    ytDlpMethodChannel.invokeMethod(
                                             "downloadProgress",
                                             mapOf(
                                                 "taskId" to taskId,
