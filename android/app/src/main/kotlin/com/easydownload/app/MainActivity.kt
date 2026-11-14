@@ -17,12 +17,46 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
     private val storageChannel = "com.easydownload/storage"
     private val ytDlpAndroidChannel = "com.easydownload/ytdlp_android"
+    private val shareIntentsChannel = "com.easydownload/share_intents"
+    private var shareMethodChannel: MethodChannel? = null
+    private var pendingSharedContent: String? = null
     private val pickDirectoryRequestCode = 9401
     private var pendingDirectoryResult: MethodChannel.Result? = null
     private val ytDlpExecutor = Executors.newSingleThreadExecutor()
 
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        captureSharedIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureSharedIntent(intent)
+    }
+
+    private fun captureSharedIntent(intent: Intent?) {
+        if (intent == null || intent.action != Intent.ACTION_SEND) return
+        val shared = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
+        if (shared.isNullOrEmpty()) return
+        val channel = shareMethodChannel
+        if (channel == null) pendingSharedContent = shared
+        else channel.invokeMethod("sharedContentReceived", shared)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        shareMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, shareIntentsChannel).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getInitialSharedContent" -> {
+                        result.success(pendingSharedContent)
+                        pendingSharedContent = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, storageChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
