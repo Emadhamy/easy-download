@@ -100,11 +100,10 @@ pub struct RangeProbe {
 /// downloads instead of guessing.
 pub fn probe_range_support(input_url: &str) -> Result<RangeProbe, String> {
     let url = DownloadUrl::parse(input_url)?;
-    let mut builder = Client::builder();
     #[cfg(test)]
-    {
-        builder = builder.no_proxy();
-    }
+    let builder = Client::builder().no_proxy();
+    #[cfg(not(test))]
+    let builder = Client::builder();
     let client = builder.build()
         .map_err(|error| format!("Could not create HTTP client: {error}"))?;
     let mut response = client.get(url.as_str())
@@ -352,12 +351,12 @@ mod tests {
     fn probes_real_http_range_response_and_sends_exact_request_header() {
         let (result, request) = probe_with_response(
             "206 Partial Content",
-            &[("Content-Range", "bytes 0-0/1234"), ("ETag", "\\"stable-v1\\"")],
+            &[("Content-Range", "bytes 0-0/1234"), ("ETag", "\"stable-v1\"")],
             b"x",
         );
         let probe = result.unwrap();
         assert_eq!(probe.total_bytes, 1234);
-        assert_eq!(probe.validator, "\\"stable-v1\\"");
+        assert_eq!(probe.validator, "\"stable-v1\"");
         assert!(probe.validator_is_etag);
         assert!(request.starts_with("GET /file.bin HTTP/1.1"));
         assert!(request.to_ascii_lowercase().contains("range: bytes=0-0"));
@@ -366,7 +365,7 @@ mod tests {
 
     #[test]
     fn rejects_http_server_that_ignores_range_request() {
-        let (result, _) = probe_with_response("200 OK", &[("ETag", "\\"v1\\"")], b"x");
+        let (result, _) = probe_with_response("200 OK", &[("ETag", "\"v1\"")], b"x");
         assert!(result.is_err());
     }
 
@@ -375,7 +374,7 @@ mod tests {
         for content_range in ["nonsense", "bytes 0-1/10", "bytes 1-1/10"] {
             let (result, _) = probe_with_response(
                 "206 Partial Content",
-                &[("Content-Range", content_range), ("ETag", "\\"v1\\"")],
+                &[("Content-Range", content_range), ("ETag", "\"v1\"")],
                 b"x",
             );
             assert!(result.is_err(), "accepted Content-Range {content_range}");
@@ -389,7 +388,7 @@ mod tests {
 
         let (weak, _) = probe_with_response(
             "206 Partial Content",
-            &[("Content-Range", "bytes 0-0/10"), ("ETag", "W/\\"weak\\"")],
+            &[("Content-Range", "bytes 0-0/10"), ("ETag", "W/\"weak\"")],
             b"x",
         );
         assert!(weak.is_err());
@@ -411,14 +410,14 @@ mod tests {
     fn rejects_probe_bodies_that_are_short_or_longer_than_one_byte() {
         let (short, _) = probe_with_response(
             "206 Partial Content",
-            &[("Content-Range", "bytes 0-0/10"), ("ETag", "\\"v1\\"")],
+            &[("Content-Range", "bytes 0-0/10"), ("ETag", "\"v1\"")],
             b"",
         );
         assert!(short.is_err());
 
         let (long, _) = probe_with_response(
             "206 Partial Content",
-            &[("Content-Range", "bytes 0-0/10"), ("ETag", "\\"v1\\"")],
+            &[("Content-Range", "bytes 0-0/10"), ("ETag", "\"v1\"")],
             b"xy",
         );
         assert!(long.is_err());
