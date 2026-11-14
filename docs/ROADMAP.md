@@ -59,6 +59,8 @@ This roadmap distinguishes code that is already present from work that still nee
 - [ ] Download the selected static GPL archive with bounded streaming, verify its SHA-256, safely extract only ffmpeg, and probe the staged executable.
 - [ ] Activate FFmpeg by versioned atomic pointer with a verified previous-version rollback path.
 - [ ] Verify and document trusted FFmpeg binary providers per platform; FFmpeg upstream publishes source code and links to independent binary maintainers.
+- [x] Assess the upstream Android FFmpeg AAR runtime blockers and document a separate NDK-built, ABI-verified Android runtime plan.
+- [ ] Build and publish a reproducible Android FFmpeg executable with the required MP3 encoder and 16 KB-compatible ELF dependencies.
 - [ ] Verify archive checksums/signatures, extraction, executable permissions, versioned activation, and rollback behavior.
 - [ ] Complete real-site and Windows/Linux runtime verification.
 
