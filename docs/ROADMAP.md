@@ -60,6 +60,8 @@ This roadmap distinguishes code that is already present from work that still nee
 - [ ] Activate FFmpeg by versioned atomic pointer with a verified previous-version rollback path.
 - [ ] Verify and document trusted FFmpeg binary providers per platform; FFmpeg upstream publishes source code and links to independent binary maintainers.
 - [x] Assess the upstream Android FFmpeg AAR runtime blockers and document a separate NDK-built, ABI-verified Android runtime plan.
+- [x] Set Android FFmpeg feature minimum to API 34 while preserving the app-wide API 24 minimum; target NDK r28+ and 16 KB page-size compatibility.
+- [ ] Audit every native library and APK ZIP alignment before introducing the Android FFmpeg runtime.
 - [ ] Build and publish a reproducible Android FFmpeg executable with the required MP3 encoder and 16 KB-compatible ELF dependencies.
 - [ ] Verify archive checksums/signatures, extraction, executable permissions, versioned activation, and rollback behavior.
 - [ ] Complete real-site and Windows/Linux runtime verification.
