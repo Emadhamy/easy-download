@@ -1759,13 +1759,28 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       var transferUrl = link.url.toString();
       var transferHeadersJson = '{}';
       if (link.ytDlpFormatId != null && Platform.isAndroid) {
-        await _ytDlpAndroidChannel.invokeMethod<String>('downloadFormat', {
-          'sourceUrl': link.url.toString(),
-          'formatId': link.ytDlpFormatId!,
-          'outputPath': destination,
-          'taskId': taskId,
-        });
-        link.receivedBytes = await File(destination).length();
+        final actualOutputPath = await _ytDlpAndroidChannel.invokeMethod<String>(
+          'downloadFormat',
+          {
+            'sourceUrl': link.url.toString(),
+            'formatId': link.ytDlpFormatId!,
+            'outputPath': destination,
+            'taskId': taskId,
+          },
+        );
+        if (actualOutputPath == null || actualOutputPath.isEmpty) {
+          throw StateError('Android yt-dlp did not return the actual output path.');
+        }
+        destination = actualOutputPath;
+        candidateName = destination.split(Platform.pathSeparator).last;
+        final outputFile = File(destination);
+        if (!await outputFile.exists()) {
+          throw StateError('The selected media download completed without creating its output file.');
+        }
+        link.receivedBytes = await outputFile.length();
+        if (link.receivedBytes <= 0) {
+          throw StateError('The selected media download produced an empty file.');
+        }
       } else {
         if (link.ytDlpFormatId != null) {
           final executable = await _installedYtDlpExecutable();
