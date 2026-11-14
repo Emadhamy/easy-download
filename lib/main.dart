@@ -254,26 +254,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       );
       return;
     }
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Video link received'),
-        content: SelectableText(uri.toString()),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: uri.toString()));
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('Copy link'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+    await _addVideoLink(initialUrl: uri.toString());
   }
 
   bool get _ytDlpSupported => Platform.isWindows || Platform.isLinux;
@@ -1754,27 +1735,34 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
       var transferUrl = link.url.toString();
       var transferHeadersJson = '{}';
-      if (link.ytDlpFormatId != null) {
-        final executable = await _installedYtDlpExecutable();
-        final resolvedRequest = jsonDecode(await rust_api.ytDlpResolveFormatRequest(
-          executablePath: executable,
-          sourceUrl: link.url.toString(),
-          formatId: link.ytDlpFormatId!,
-        )) as Map<String, dynamic>;
-        transferUrl = resolvedRequest['url'] as String;
-        final headers = resolvedRequest['headers'];
-        if (headers is Map<String, dynamic>) {
-          transferHeadersJson = jsonEncode(headers);
+      if (link.ytDlpFormatId != null && Platform.isAndroid) {
+        await _ytDlpAndroidChannel.invokeMethod<String>('downloadFormat', {
+          'sourceUrl': link.url.toString(),
+          'formatId': link.ytDlpFormatId!,
+          'outputPath': destination,
+        });
+      } else {
+        if (link.ytDlpFormatId != null) {
+          final executable = await _installedYtDlpExecutable();
+          final resolvedRequest = jsonDecode(await rust_api.ytDlpResolveFormatRequest(
+            executablePath: executable,
+            sourceUrl: link.url.toString(),
+            formatId: link.ytDlpFormatId!,
+          )) as Map<String, dynamic>;
+          transferUrl = resolvedRequest['url'] as String;
+          final headers = resolvedRequest['headers'];
+          if (headers is Map<String, dynamic>) {
+            transferHeadersJson = jsonEncode(headers);
+          }
         }
-      }
 
-      await for (final event in rust_api.downloadFileResumableControlledWithHeaders(
+        await for (final event in rust_api.downloadFileResumableControlledWithHeaders(
         taskId: taskId,
         inputUrl: transferUrl,
         headersJson: transferHeadersJson,
-        destinationPath: destination,
-      )) {
-        final progress = jsonDecode(event) as Map<String, dynamic>;
+          destinationPath: destination,
+        )) {
+          final progress = jsonDecode(event) as Map<String, dynamic>;
         final received = (progress['received'] as num).toInt();
         final total = (progress['total'] as num?)?.toInt();
         final now = DateTime.now();
@@ -1787,7 +1775,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           link.receivedBytes = received;
           link.totalBytes = total;
           link.speedBytesPerSecond = speed < 0 ? 0 : speed;
-        });
+          });
+        }
       }
       var completedLocation = destination;
       if (Platform.isAndroid && _androidDownloadTreeUri != null) {
@@ -1944,9 +1933,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Future<void> _addVideoLink() async {
-    if (!_ytDlpSupported) {
+    if (!_ytDlpManagerSupported) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Video downloads through yt-dlp are currently supported on Windows and Linux.')),
+        const SnackBar(content: Text('yt-dlp video downloads are not available on this platform.')),
       );
       return;
     }
@@ -1980,11 +1969,19 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             });
             try {
               final normalized = await rust_api.validateDownloadUrl(input: controller.text.trim());
-              final executable = await _installedYtDlpExecutable();
-              final raw = await rust_api.ytDlpInspectFormats(
-                executablePath: executable,
-                sourceUrl: normalized,
-              );
+              final String raw;
+              if (Platform.isAndroid) {
+                raw = (await _ytDlpAndroidChannel.invokeMethod<String>(
+                  'inspectFormats',
+                  {'sourceUrl': normalized},
+                ))!;
+              } else {
+                final executable = await _installedYtDlpExecutable();
+                raw = await rust_api.ytDlpInspectFormats(
+                  executablePath: executable,
+                  sourceUrl: normalized,
+                );
+              }
               final decoded = jsonDecode(raw) as Map<String, dynamic>;
               final available = (decoded['formats'] as List<dynamic>? ?? [])
                   .whereType<Map<String, dynamic>>()
@@ -2085,7 +2082,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Only formats that already contain both video and audio are listed. Separate high-resolution streams will be available after FFmpeg is integrated.',
+                        'These are source-reported formats containing both video and audio. Separate high-resolution streams and MP3 conversion are the next integration step.',
                         style: TextStyle(fontSize: 11, color: Color(0xFF9A9AAF)),
                       ),
                     ],
