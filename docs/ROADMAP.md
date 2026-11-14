@@ -13,7 +13,8 @@ This roadmap distinguishes code that is already present from work that still nee
 
 ## Phase 2 — Direct downloads
 
-- [x] Implement chunked HTTP(S) downloads in Rust.
+- [x] Implement streamed HTTP(S) downloads in bounded buffers in Rust.
+- [ ] Implement parallel HTTP Range segmented downloads with bounded concurrency, per-segment recovery, and safe final assembly (see `docs/SEGMENTED_DOWNLOADS.md`).
 - [x] Stream progress events through the Flutter–Rust bridge.
 - [x] Add active-task pause, resume, and cancel controls.
 - [x] Add a Flutter download list with search, sorting, and file-type filters.
@@ -24,6 +25,7 @@ This roadmap distinguishes code that is already present from work that still nee
 - [x] Add temporary-file handling, safe finalization, and protected resume metadata.
 - [x] Add user-selected save locations and destination conflict controls.
 - [ ] Add durable task-state persistence and recovery.
+- [ ] Add macOS desktop support (`macos-x86_64` and `macos-aarch64`) across Flutter, Rust target detection, packaging, and CI; do not claim support until release artifacts and tests pass.
 
 ## Phase 3 — Video and audio
 
