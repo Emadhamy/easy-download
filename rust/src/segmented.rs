@@ -31,6 +31,56 @@ impl ByteRange {
     }
 }
 
+/// A strictly parsed Content-Range response for a single byte-range request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentRange {
+    pub start: u64,
+    pub end: u64,
+    pub total: u64,
+}
+
+impl ContentRange {
+    /// Parses the canonical form: `bytes START-END/TOTAL`.
+    /// Unsatisfied ranges and unknown totals are deliberately rejected.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim();
+        let span = value.strip_prefix("bytes ")
+            .ok_or_else(|| "Unsupported Content-Range unit".to_string())?;
+        let (range, total) = span.split_once('/')
+            .ok_or_else(|| "Malformed Content-Range total".to_string())?;
+        if total.is_empty() || total == "*" || total.contains('/') {
+            return Err("Content-Range must include a known total length".to_string());
+        }
+        let (start, end) = range.split_once('-')
+            .ok_or_else(|| "Malformed Content-Range span".to_string())?;
+        if start.is_empty() || end.is_empty() || end.contains('-') {
+            return Err("Malformed Content-Range span".to_string());
+        }
+        let start = start.parse::<u64>()
+            .map_err(|_| "Invalid Content-Range start".to_string())?;
+        let end = end.parse::<u64>()
+            .map_err(|_| "Invalid Content-Range end".to_string())?;
+        let total = total.parse::<u64>()
+            .map_err(|_| "Invalid Content-Range total".to_string())?;
+        if total == 0 || start > end || end >= total {
+            return Err("Content-Range bounds are outside the representation".to_string());
+        }
+        Ok(Self { start, end, total })
+    }
+
+    /// Confirms that the response exactly matches the requested range and file size.
+    pub fn validate(self, expected: ByteRange, expected_total: u64) -> Result<(), String> {
+        if self.start != expected.start || self.end != expected.end || self.total != expected_total {
+            return Err(format!(
+                "Content-Range mismatch: received bytes {}-{}/{}; expected bytes {}-{}/{}",
+                self.start, self.end, self.total,
+                expected.start, expected.end, expected_total
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Divides a known positive file length into contiguous, non-overlapping
 /// inclusive ranges. Earlier ranges receive one extra byte when division is
 /// uneven. The segment count is intentionally capped to keep worker creation
@@ -145,6 +195,38 @@ mod tests {
         assert!(plan_ranges(10, 0).is_err());
         assert!(plan_ranges(10, MAX_SEGMENTS_PER_FILE + 1).is_err());
         assert!(plan_ranges(3, 4).is_err());
+    }
+
+    #[test]
+    fn parses_and_validates_exact_content_range() {
+        let parsed = super::ContentRange::parse("bytes 10-19/100").unwrap();
+        assert_eq!(parsed, super::ContentRange { start: 10, end: 19, total: 100 });
+        assert!(parsed.validate(ByteRange { start: 10, end: 19 }, 100).is_ok());
+    }
+
+    #[test]
+    fn rejects_malformed_or_unknown_content_ranges() {
+        for value in [
+            "items 0-1/2",
+            "bytes 0-1/*",
+            "bytes 0-1/",
+            "bytes -1/2",
+            "bytes 2-1/3",
+            "bytes 0-3/3",
+            "bytes 0-1/0",
+            "bytes 0-1/2/3",
+            "bytes 0-x/2",
+        ] {
+            assert!(super::ContentRange::parse(value).is_err(), "accepted {value}");
+        }
+    }
+
+    #[test]
+    fn rejects_content_range_that_does_not_match_requested_segment() {
+        let parsed = super::ContentRange::parse("bytes 10-19/100").unwrap();
+        assert!(parsed.validate(ByteRange { start: 10, end: 18 }, 100).is_err());
+        assert!(parsed.validate(ByteRange { start: 10, end: 19 }, 101).is_err());
+        assert!(parsed.validate(ByteRange { start: 11, end: 19 }, 100).is_err());
     }
 
     #[test]
