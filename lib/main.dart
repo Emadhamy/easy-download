@@ -87,6 +87,8 @@ class _LinkDraft {
   String? taskId;
   int receivedBytes = 0;
   int? totalBytes;
+  double? progressPercent;
+  int? progressEtaSeconds;
   double speedBytesPerSecond = 0;
   String? savedPath;
   String? pendingPath;
@@ -214,6 +216,20 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   void initState() {
     super.initState();
     _loadHistory();
+    _ytDlpAndroidChannel.setMethodCallHandler((call) async {
+      if (call.method == 'downloadProgress' && call.arguments is Map) {
+        final event = Map<dynamic, dynamic>.from(call.arguments as Map);
+        final taskId = event['taskId'] as String?;
+        final percent = (event['percent'] as num?)?.toDouble();
+        if (taskId == null || percent == null || !mounted) return;
+        final matching = _links.where((item) => item.taskId == taskId).toList();
+        if (matching.isEmpty) return;
+        setState(() {
+          matching.first.progressPercent = percent.clamp(0.0, 100.0);
+          matching.first.progressEtaSeconds = (event['etaSeconds'] as num?)?.toInt();
+        });
+      }
+    });
     _shareIntentsChannel.setMethodCallHandler((call) async {
       if (call.method == "sharedContentReceived") {
         await _handleSharedContent(call.arguments as String?);
@@ -1686,6 +1702,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         link.totalBytes = null;
       }
       link.speedBytesPerSecond = 0;
+      link.progressPercent = null;
+      link.progressEtaSeconds = null;
     });
     var previousBytes = link.receivedBytes;
     var previousTime = DateTime.now();
@@ -1745,7 +1763,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           'sourceUrl': link.url.toString(),
           'formatId': link.ytDlpFormatId!,
           'outputPath': destination,
+          'taskId': taskId,
         });
+        link.receivedBytes = await File(destination).length();
       } else {
         if (link.ytDlpFormatId != null) {
           final executable = await _installedYtDlpExecutable();
@@ -1849,6 +1869,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _pauseDownload(_LinkDraft link) async {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading || link.isPaused) return;
+    if (Platform.isAndroid && link.ytDlpFormatId != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pause is not supported for Android yt-dlp downloads yet.')),
+      );
+      return;
+    }
     try {
       await rust_api.pauseDownload(taskId: taskId);
       if (mounted) setState(() => link.isPaused = true);
@@ -1865,6 +1891,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _resumeDownload(_LinkDraft link) async {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading || !link.isPaused) return;
+    if (Platform.isAndroid && link.ytDlpFormatId != null) return;
     if (_links.where((item) => item.isDownloading && !item.isPaused).length >=
         _maxConcurrentDownloads) {
       if (mounted) {
@@ -1890,7 +1917,17 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading) return;
     try {
-      await rust_api.cancelDownload(taskId: taskId);
+      if (Platform.isAndroid && link.ytDlpFormatId != null) {
+        final cancelled = await _ytDlpAndroidChannel.invokeMethod<bool>(
+          'cancelDownload',
+          {'taskId': taskId},
+        );
+        if (cancelled != true) {
+          throw StateError('The Android yt-dlp process could not be stopped.');
+        }
+      } else {
+        await rust_api.cancelDownload(taskId: taskId);
+      }
       link.isCancelled = true;
       if (mounted) {
         setState(() {
@@ -2708,15 +2745,19 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                                     ),
                                     const SizedBox(height: 5),
                                     LinearProgressIndicator(
-                                      value: link.totalBytes != null && link.totalBytes! > 0
-                                          ? (link.receivedBytes / link.totalBytes!).clamp(0.0, 1.0)
-                                          : null,
+                                      value: link.progressPercent != null
+                                          ? (link.progressPercent! / 100).clamp(0.0, 1.0)
+                                          : link.totalBytes != null && link.totalBytes! > 0
+                                              ? (link.receivedBytes / link.totalBytes!).clamp(0.0, 1.0)
+                                              : null,
                                       minHeight: 4,
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}${link.totalBytes != null && link.totalBytes! > link.receivedBytes && link.speedBytesPerSecond > 0 ? '  •  ${_formatRemaining(((link.totalBytes! - link.receivedBytes) / link.speedBytesPerSecond).ceil())}' : ''}',
+                                      link.progressPercent != null
+                                          ? 'yt-dlp  •  ${link.progressPercent!.toStringAsFixed(0)}%${link.progressEtaSeconds != null && link.progressEtaSeconds! > 0 ? '  •  ${_formatRemaining(link.progressEtaSeconds!)}' : ''}'
+                                          : '${_formatBytes(link.speedBytesPerSecond.round())}/s  •  ${link.totalBytes != null && link.totalBytes! > 0 ? (link.receivedBytes * 100 / link.totalBytes!).toStringAsFixed(0) + '%' : 'Calculating…'}${link.totalBytes != null && link.totalBytes! > link.receivedBytes && link.speedBytesPerSecond > 0 ? '  •  ${_formatRemaining(((link.totalBytes! - link.receivedBytes) / link.speedBytesPerSecond).ceil())}' : ''}',
                                       style: const TextStyle(color: muted, fontSize: 11),
                                     ),
                                     if (link.isPaused)
