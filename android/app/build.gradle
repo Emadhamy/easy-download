@@ -29,6 +29,13 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // The current APK is ARM64-only; exclude native payloads for unsupported ABIs.
+            excludes += [
+                "**/armeabi-v7a/**",
+                "**/armeabi/**",
+                "**/x86/**",
+                "**/x86_64/**"
+            ]
         }
     }
 
