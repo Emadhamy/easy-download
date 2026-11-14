@@ -179,6 +179,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   bool _ytDlpAutoCheckEnabled = true;
   bool _ytDlpChecking = false;
   bool _ytDlpInstalling = false;
+  bool _ytDlpRollingBack = false;
   String? _ytDlpInstalledVersion;
   String? _ytDlpLatestVersion;
   String? _ytDlpLastCheckedAt;
@@ -386,6 +387,62 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           _ytDlpStatus = 'Installed yt-dlp could not be verified: $error';
         });
       }
+    }
+  }
+
+  Future<void> _rollbackYtDlp() async {
+    if (!_ytDlpSupported || _ytDlpInstalling || _ytDlpRollingBack) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restore previous yt-dlp version?'),
+        content: const Text(
+          'The currently active yt-dlp version and the previous verified version will be swapped.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _ytDlpRollingBack = true;
+      _ytDlpStatus = 'Validating and restoring the previous yt-dlp version...';
+    });
+    try {
+      final root = await _ytDlpInstallRoot();
+      final raw = await rust_api.ytDlpRollback(installRoot: root);
+      final restored = jsonDecode(raw) as Map<String, dynamic>;
+      await _refreshInstalledYtDlp();
+      final version = restored['version'] as String? ?? _ytDlpInstalledVersion ?? 'unknown';
+      final entry = '\${DateTime.now().toLocal().toString().substring(0, 16)} — Restored yt-dlp $version';
+      final prefs = await SharedPreferences.getInstance();
+      final history = [entry, ..._ytDlpHistory].take(10).toList();
+      await prefs.setStringList(_ytDlpHistoryKey, history);
+      if (!mounted) return;
+      setState(() {
+        _ytDlpHistory = history;
+        _ytDlpStatus = 'Previous yt-dlp version $version restored and verified.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('yt-dlp $version restored successfully.')),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _ytDlpStatus = 'Rollback failed; the active version was not changed: $error');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not restore yt-dlp: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _ytDlpRollingBack = false);
     }
   }
 
@@ -1229,6 +1286,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.system_update_alt_rounded),
                   label: Text(_ytDlpInstalledVersion == null ? 'Install yt-dlp' : 'Update now'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: supported && _ytDlpInstalledVersion != null &&
+                          !_ytDlpInstalling && !_ytDlpRollingBack
+                      ? _rollbackYtDlp
+                      : null,
+                  icon: _ytDlpRollingBack
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.history_rounded),
+                  label: const Text('Rollback'),
                 ),
               ],
             ),
