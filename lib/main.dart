@@ -2084,7 +2084,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           }
 
           return AlertDialog(
-            title: const Text('Choose video quality'),
+            title: const Text('Choose video or audio quality'),
             content: SizedBox(
               width: 480,
               child: SingleChildScrollView(
@@ -2246,7 +2246,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     await _saveHistory();
     _pumpQueue();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Video added to the download queue.')),
+      const SnackBar(content: Text('Media added to the download queue.')),
     );
   }
 
