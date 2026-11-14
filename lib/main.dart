@@ -173,6 +173,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   static const _ytDlpHistoryKey = 'easy_download_yt_dlp_history_v1';
 
   Timer? _ytDlpUpdateTimer;
+  Future<void>? _ytDlpInitialization;
   bool _ytDlpAutoCheckEnabled = true;
   bool _ytDlpChecking = false;
   bool _ytDlpInstalling = false;
@@ -220,7 +221,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       }
     });
     unawaited(_loadInitialSharedContent());
-    unawaited(_initializeYtDlpManager());
+    _ytDlpInitialization = _initializeYtDlpManager();
     unawaited(_initializeFfmpegManager());
   }
 
@@ -253,6 +254,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         const SnackBar(content: Text('The shared content does not contain a valid HTTP(S) link.')),
       );
       return;
+    }
+    if (Platform.isAndroid && _ytDlpInstalledVersion == null) {
+      await _ytDlpInitialization;
+      if (!mounted) return;
     }
     await _addVideoLink(initialUrl: uri.toString());
   }
