@@ -6,7 +6,7 @@
 
 use crate::DownloadUrl;
 use reqwest::blocking::Client;
-use reqwest::header::{ETAG, LAST_MODIFIED, RANGE};
+use reqwest::header::{ACCEPT_ENCODING, ETAG, LAST_MODIFIED, RANGE};
 use reqwest::StatusCode;
 use std::io::Read;
 
@@ -109,6 +109,7 @@ pub fn probe_range_support(input_url: &str) -> Result<RangeProbe, String> {
         .map_err(|error| format!("Could not create HTTP client: {error}"))?;
     let mut response = client.get(url.as_str())
         .header(RANGE, "bytes=0-0")
+        .header(ACCEPT_ENCODING, "identity")
         .send()
         .map_err(|error| format!("Range capability probe failed: {error}"))?;
 
@@ -139,6 +140,12 @@ pub fn probe_range_support(input_url: &str) -> Result<RangeProbe, String> {
         .map_err(|error| format!("Could not read range probe body: {error}"))?;
     if received != 1 {
         return Err("Range probe did not return exactly one byte".to_string());
+    }
+    let mut extra_byte = [0_u8; 1];
+    if response.read(&mut extra_byte)
+        .map_err(|error| format!("Could not validate range probe body length: {error}"))? != 0
+    {
+        return Err("Range probe returned more than one byte".to_string());
     }
 
     Ok(RangeProbe {
@@ -200,7 +207,45 @@ pub fn plan_ranges(total_bytes: u64, segment_count: usize) -> Result<Vec<ByteRan
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_ranges, ByteRange, MAX_SEGMENTS_PER_FILE};
+    use super::{plan_ranges, probe_range_support, ByteRange, MAX_SEGMENTS_PER_FILE};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::{self, JoinHandle};
+
+    fn start_http_server(status: &str, headers: &[(&str, &str)], body: &[u8]) -> (String, JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let status = status.to_string();
+        let headers = headers.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect::<Vec<_>>();
+        let body = body.to_vec();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let count = stream.read(&mut buffer).unwrap();
+                if count == 0 { break; }
+                request.extend_from_slice(&buffer[..count]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") { break; }
+            }
+            let mut response = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+            for (name, value) in headers {
+                response.push_str(&format!("{name}: {value}\r\n"));
+            }
+            response.push_str("\r\n");
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (format!("http://{address}/file.bin"), handle)
+    }
+
+    fn probe_with_response(status: &str, headers: &[(&str, &str)], body: &[u8]) -> (Result<super::RangeProbe, String>, String) {
+        let (url, server) = start_http_server(status, headers, body);
+        let result = probe_range_support(&url);
+        let request = server.join().unwrap();
+        (result, request)
+    }
 
     #[test]
     fn plans_even_ranges_without_gaps_or_overlaps() {
@@ -302,4 +347,81 @@ mod tests {
         assert_eq!(range.to_header_value(), "bytes=12-34");
         assert!(!range.is_empty());
     }
+
+    #[test]
+    fn probes_real_http_range_response_and_sends_exact_request_header() {
+        let (result, request) = probe_with_response(
+            "206 Partial Content",
+            &[("Content-Range", "bytes 0-0/1234"), ("ETag", "\\"stable-v1\\"")],
+            b"x",
+        );
+        let probe = result.unwrap();
+        assert_eq!(probe.total_bytes, 1234);
+        assert_eq!(probe.validator, "\\"stable-v1\\"");
+        assert!(probe.validator_is_etag);
+        assert!(request.starts_with("GET /file.bin HTTP/1.1"));
+        assert!(request.to_ascii_lowercase().contains("range: bytes=0-0"));
+        assert!(request.to_ascii_lowercase().contains("accept-encoding: identity"));
+    }
+
+    #[test]
+    fn rejects_http_server_that_ignores_range_request() {
+        let (result, _) = probe_with_response("200 OK", &[("ETag", "\\"v1\\"")], b"x");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_and_mismatched_content_range_responses() {
+        for content_range in ["nonsense", "bytes 0-1/10", "bytes 1-1/10"] {
+            let (result, _) = probe_with_response(
+                "206 Partial Content",
+                &[("Content-Range", content_range), ("ETag", "\\"v1\\"")],
+                b"x",
+            );
+            assert!(result.is_err(), "accepted Content-Range {content_range}");
+        }
+    }
+
+    #[test]
+    fn rejects_missing_or_weak_range_validators() {
+        let (missing, _) = probe_with_response("206 Partial Content", &[("Content-Range", "bytes 0-0/10")], b"x");
+        assert!(missing.is_err());
+
+        let (weak, _) = probe_with_response(
+            "206 Partial Content",
+            &[("Content-Range", "bytes 0-0/10"), ("ETag", "W/\\"weak\\"")],
+            b"x",
+        );
+        assert!(weak.is_err());
+    }
+
+    #[test]
+    fn accepts_last_modified_when_strong_etag_is_absent() {
+        let (result, _) = probe_with_response(
+            "206 Partial Content",
+            &[("Content-Range", "bytes 0-0/10"), ("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")],
+            b"x",
+        );
+        let probe = result.unwrap();
+        assert_eq!(probe.total_bytes, 10);
+        assert!(!probe.validator_is_etag);
+    }
+
+    #[test]
+    fn rejects_probe_bodies_that_are_short_or_longer_than_one_byte() {
+        let (short, _) = probe_with_response(
+            "206 Partial Content",
+            &[("Content-Range", "bytes 0-0/10"), ("ETag", "\\"v1\\"")],
+            b"",
+        );
+        assert!(short.is_err());
+
+        let (long, _) = probe_with_response(
+            "206 Partial Content",
+            &[("Content-Range", "bytes 0-0/10"), ("ETag", "\\"v1\\"")],
+            b"xy",
+        );
+        assert!(long.is_err());
+    }
+
 }
