@@ -403,8 +403,8 @@ fn resolve_installed(root: &Path, active: &ActiveYtDlp, target: &str) -> Result<
     let components: Vec<_> = relative.components().collect();
     if components.len() != 3
         || components[0].as_os_str() != "versions"
-        || components[1].as_os_str() != active.version
-        || components[2].as_os_str() != active.asset_name
+        || components[1].as_os_str().to_str() != Some(active.version.as_str())
+        || components[2].as_os_str().to_str() != Some(active.asset_name.as_str())
     {
         return Err("Installed yt-dlp executable path does not match the managed layout".to_string());
     }
