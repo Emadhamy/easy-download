@@ -167,7 +167,7 @@ class MainActivity : FlutterActivity() {
                                 val hasAudio = audioCodec.isNotBlank() && audioCodec != "none"
                                 // Expose directly downloadable combined video and audio-only formats.
                                 // Video-only streams are withheld until FFmpeg can safely merge them.
-                                if ((!hasVideo || !hasAudio) && (hasVideo || !hasAudio)) continue
+                                if (hasVideo || !hasAudio) continue
                                 val height = item.optInt("height", 0)
                                 val resolution = item.optString("resolution").takeIf { it.isNotBlank() && it != "NA" }
                                     ?: if (height > 0) "${height}p" else "Unknown quality"
