@@ -1029,3 +1029,154 @@ where
     }
     assembly_result
 }
+
+
+#[cfg(test)]
+mod orchestrator_tests {
+    use super::{
+        download_segmented_to_path, RangeProbe, SegmentManifest,
+        DEFAULT_SEGMENT_COUNT, USER_MAX_SEGMENT_COUNT,
+    };
+    use crate::DownloadControl;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixture() -> Vec<u8> {
+        (0..=255).cycle().take(128 * 1024).map(|value| value as u8).collect()
+    }
+
+    fn range_server(body: Vec<u8>, expected_requests: usize) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            for _ in 0..expected_requests {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 2048];
+                loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    if count == 0 { break; }
+                    request.extend_from_slice(&buffer[..count]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") { break; }
+                }
+                let request = String::from_utf8_lossy(&request);
+                let range_line = request.lines()
+                    .find(|line| line.to_ascii_lowercase().starts_with("range:"))
+                    .expect("worker must send Range header");
+                let value = range_line.split_once('=').unwrap().1.trim();
+                let (start, end) = value.split_once('-').unwrap();
+                let start = start.parse::<usize>().unwrap();
+                let end = end.parse::<usize>().unwrap();
+                assert!(start <= end && end < body.len());
+                let chunk = &body[start..=end];
+                let headers = format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nETag: \"orchestrator-v1\"\r\nConnection: close\r\n\r\n",
+                    chunk.len(), start, end, body.len()
+                );
+                stream.write_all(headers.as_bytes()).unwrap();
+                stream.write_all(chunk).unwrap();
+            }
+        });
+        (format!("http://{address}/fixture.bin"), handle)
+    }
+
+    fn destination(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("easy-download-orchestrator-{label}-{unique}.bin"))
+    }
+
+    fn run_success(segment_count: usize) {
+        let body = fixture();
+        let (url, server) = range_server(body.clone(), segment_count);
+        let probe = RangeProbe {
+            total_bytes: body.len() as u64,
+            validator: "\"orchestrator-v1\"".to_string(),
+            validator_is_etag: true,
+        };
+        let manifest = SegmentManifest::new(&probe, segment_count).unwrap();
+        let path = destination(&format!("success-{segment_count}"));
+        let mut progress_events = Vec::new();
+        let received = download_segmented_to_path(
+            &url,
+            &manifest,
+            &path,
+            segment_count,
+            DownloadControl::new(),
+            |completed, total, bytes, expected| {
+                progress_events.push((completed, total, bytes, expected));
+            },
+        ).unwrap();
+        server.join().unwrap();
+        assert_eq!(received, body.len() as u64);
+        assert_eq!(std::fs::read(&path).unwrap(), body);
+        assert_eq!(progress_events.len(), segment_count);
+        assert_eq!(progress_events.last().unwrap().0, segment_count);
+        assert_eq!(progress_events.last().unwrap().1, segment_count);
+        assert_eq!(progress_events.last().unwrap().2, body.len() as u64);
+        assert_eq!(progress_events.last().unwrap().3, body.len() as u64);
+        for index in 0..segment_count {
+            let mut part = path.as_os_str().to_os_string();
+            part.push(format!(".segment-{index}.part"));
+            assert!(!std::path::PathBuf::from(part).exists());
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn default_policy_uses_four_segments() {
+        assert_eq!(DEFAULT_SEGMENT_COUNT, 4);
+        run_success(DEFAULT_SEGMENT_COUNT);
+    }
+
+    #[test]
+    fn user_can_select_eight_segments() {
+        assert_eq!(USER_MAX_SEGMENT_COUNT, 8);
+        run_success(USER_MAX_SEGMENT_COUNT);
+    }
+
+    #[test]
+    fn rejects_segment_count_outside_user_settings() {
+        let probe = RangeProbe {
+            total_bytes: 64,
+            validator: "\"v1\"".to_string(),
+            validator_is_etag: true,
+        };
+        let manifest = SegmentManifest::new(&probe, 3).unwrap();
+        let path = destination("invalid-count");
+        let result = download_segmented_to_path(
+            "http://127.0.0.1:1/file",
+            &manifest,
+            &path,
+            3,
+            DownloadControl::new(),
+            |_, _, _, _| {},
+        );
+        assert!(result.unwrap_err().contains("between 4 and 8"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn refuses_to_overwrite_an_existing_destination() {
+        let path = destination("existing");
+        std::fs::write(&path, b"keep-existing").unwrap();
+        let probe = RangeProbe {
+            total_bytes: 64,
+            validator: "\"v1\"".to_string(),
+            validator_is_etag: true,
+        };
+        let manifest = SegmentManifest::new(&probe, DEFAULT_SEGMENT_COUNT).unwrap();
+        let result = download_segmented_to_path(
+            "http://127.0.0.1:1/file",
+            &manifest,
+            &path,
+            DEFAULT_SEGMENT_COUNT,
+            DownloadControl::new(),
+            |_, _, _, _| {},
+        );
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep-existing");
+        std::fs::remove_file(path).unwrap();
+    }
+}
