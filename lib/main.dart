@@ -216,6 +216,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     _shareIntentsChannel.setMethodCallHandler((call) async {
       if (call.method == "sharedContentReceived") {
         await _handleSharedContent(call.arguments as String?);
+        await _shareIntentsChannel.invokeMethod<void>("acknowledgeSharedContent");
       }
     });
     unawaited(_loadInitialSharedContent());
