@@ -5,6 +5,7 @@ import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -131,6 +132,91 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "inspectFormats" -> ytDlpExecutor.execute {
+                        try {
+                            val sourceUrl = call.argument<String>("sourceUrl")
+                                ?: throw IllegalArgumentException("A source URL is required.")
+                            val source = Uri.parse(sourceUrl)
+                            if (source.scheme != "http" && source.scheme != "https" || source.host.isNullOrBlank()) {
+                                throw IllegalArgumentException("Only valid HTTP(S) video URLs are supported.")
+                            }
+                            YoutubeDL.getInstance().init(applicationContext)
+                            val request = YoutubeDLRequest(sourceUrl).apply {
+                                addOption("--dump-single-json")
+                                addOption("--skip-download")
+                                addOption("--no-warnings")
+                                addOption("--no-playlist")
+                            }
+                            val output = YoutubeDL.getInstance().execute(request).out
+                            val info = JSONObject(output)
+                            val sourceFormats = info.optJSONArray("formats") ?: org.json.JSONArray()
+                            val formats = org.json.JSONArray()
+                            for (index in 0 until sourceFormats.length()) {
+                                val item = sourceFormats.optJSONObject(index) ?: continue
+                                val videoCodec = item.optString("vcodec", "none")
+                                val audioCodec = item.optString("acodec", "none")
+                                val hasVideo = videoCodec.isNotBlank() && videoCodec != "none"
+                                val hasAudio = audioCodec.isNotBlank() && audioCodec != "none"
+                                // The current Android transfer path supports a single combined stream.
+                                if (!hasVideo || !hasAudio) continue
+                                val height = item.optInt("height", 0)
+                                val resolution = item.optString("resolution").takeIf { it.isNotBlank() && it != "NA" }
+                                    ?: if (height > 0) "${height}p" else "Unknown quality"
+                                val format = JSONObject()
+                                    .put("formatId", item.optString("format_id"))
+                                    .put("ext", item.optString("ext", "mp4"))
+                                    .put("resolution", resolution)
+                                    .put("fps", item.optDouble("fps").takeIf { !it.isNaN() && it > 0 })
+                                    .put("filesize", item.optLong("filesize", -1).takeIf { it > 0 })
+                                    .put("filesizeApprox", item.optLong("filesize_approx", -1).takeIf { it > 0 })
+                                    .put("hasVideo", hasVideo)
+                                    .put("hasAudio", hasAudio)
+                                    .put("formatNote", item.optString("format_note"))
+                                formats.put(format)
+                            }
+                            val response = JSONObject()
+                                .put("title", info.optString("title", "Video"))
+                                .put("formats", formats)
+                            runOnUiThread { result.success(response.toString()) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("YTDLP_ANDROID_INSPECT_FAILED", error.message, null) }
+                        }
+                    }
+                    "downloadFormat" -> ytDlpExecutor.execute {
+                        try {
+                            val sourceUrl = call.argument<String>("sourceUrl")
+                                ?: throw IllegalArgumentException("A source URL is required.")
+                            val formatId = call.argument<String>("formatId")
+                                ?: throw IllegalArgumentException("A format ID is required.")
+                            val outputPath = call.argument<String>("outputPath")
+                                ?: throw IllegalArgumentException("An output path is required.")
+                            val source = Uri.parse(sourceUrl)
+                            if ((source.scheme != "http" && source.scheme != "https") || source.host.isNullOrBlank()) {
+                                throw IllegalArgumentException("Only valid HTTP(S) video URLs are supported.")
+                            }
+                            val output = File(outputPath).canonicalFile
+                            val appRoot = filesDir.canonicalFile
+                            if (!output.path.startsWith(appRoot.path + File.separator)) {
+                                throw IllegalArgumentException("The output path must stay inside Easy Download's private storage.")
+                            }
+                            output.parentFile?.mkdirs()
+                            YoutubeDL.getInstance().init(applicationContext)
+                            val request = YoutubeDLRequest(sourceUrl).apply {
+                                addOption("-f", formatId)
+                                addOption("-o", output.absolutePath)
+                                addOption("--no-playlist")
+                                addOption("--no-part")
+                                addOption("--no-mtime")
+                            }
+                            YoutubeDL.getInstance().execute(request)
+                            if (!output.isFile || output.length() <= 0L) {
+                                throw IllegalStateException("yt-dlp finished without creating the expected output file.")
+                            }
+                            runOnUiThread { result.success(output.absolutePath) }
+                        } catch (error: Exception) {
+                            runOnUiThread { result.error("YTDLP_ANDROID_DOWNLOAD_FAILED", error.message, null) }
+                        }
+                    }
                     "initialize" -> ytDlpExecutor.execute {
                         try {
                             YoutubeDL.getInstance().init(applicationContext)
