@@ -25,23 +25,28 @@ def alignment_value(value: str) -> int:
     return int(value, 16)
 
 
-def audit_elf(path: Path, readelf: str) -> list[str]:
+def audit_elf(path: Path, readelf: str, archive_path: str) -> tuple[list[str], bool]:
+    # youtubedl-android intentionally packages Python ZIP data with a .so suffix.
+    # It is not a loadable ELF and must not be passed to llvm-readelf.
+    with path.open("rb") as source:
+        if source.read(4) != b"\\x7fELF":
+            return [], False
     result = run([readelf, "-lW", str(path)])
     if result.returncode:
-        return [f"{path.name}: llvm-readelf failed: {result.stderr.strip()}"]
+        return [f"{archive_path}: llvm-readelf failed: {result.stderr.strip()}"], True
     loads = []
     for line in result.stdout.splitlines():
         match = LOAD_LINE.match(line)
         if match:
             loads.append(alignment_value(match.group(1)))
     if not loads:
-        return [f"{path.name}: no ELF LOAD segments found"]
+        return [f"{archive_path}: no ELF LOAD segments found"], True
     failures = [
-        f"{path.name}: LOAD segment alignment 0x{value:x} is below 0x4000"
+        f"{archive_path}: LOAD segment alignment 0x{value:x} is below 0x4000"
         for value in loads
         if value < 0x4000
     ]
-    return failures
+    return failures, True
 
 
 def main() -> int:
@@ -64,6 +69,7 @@ def main() -> int:
 
     failures: list[str] = []
     checked = 0
+    skipped_non_elf = 0
     with tempfile.TemporaryDirectory(prefix="easy-download-16kb-") as temp:
         root = Path(temp)
         with zipfile.ZipFile(args.apk) as archive:
@@ -79,10 +85,14 @@ def main() -> int:
                 destination = root / entry.filename
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(archive.read(entry))
-                checked += 1
-                failures.extend(audit_elf(destination, args.readelf))
+                elf_failures, is_elf = audit_elf(destination, args.readelf, entry.filename)
+                if is_elf:
+                    checked += 1
+                    failures.extend(elf_failures)
+                else:
+                    skipped_non_elf += 1
 
-    print(f"Checked {checked} native shared libraries in {args.apk}.")
+    print(f"Checked {checked} ELF shared libraries in {args.apk}; skipped {skipped_non_elf} non-ELF .so payload(s).")
     if failures:
         print("16 KB ELF alignment audit failed:")
         for failure in failures:
