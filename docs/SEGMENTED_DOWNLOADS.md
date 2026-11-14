@@ -1,6 +1,6 @@
 # Parallel segmented downloads
 
-Status: approved engineering direction; not implemented yet.
+Status: initial Rust orchestration implemented on `main`; durable recovery, Flutter settings/bridge integration, and platform rollout remain pending.
 
 ## What exists today
 
@@ -26,11 +26,12 @@ Do not assume that a server supports ranges merely because it advertises `Accept
 
 ## Initial conservative policy
 
-- Start with 4 concurrent segments per file.
-- Cap at 8 segments per file; do not create an unbounded number of workers.
+- Default to 4 concurrent segments per file.
+- Let the user select any value from 4 through 8; cap at 8 and never create unbounded workers.
+- Keep the selected segment count as a per-download setting; changing it must not alter an already-running task.
 - Use a minimum file-size threshold before segmentation (initial proposal: 8 MiB); smaller files use the existing single-connection path.
 - Keep global download concurrency separate from per-file segment concurrency so total sockets remain bounded.
-- Make segment count a future user setting only after real-device and desktop measurements. The initial implementation should use safe internal defaults.
+- The Rust orchestration API now accepts a validated per-download segment count from 4 through 8, with `DEFAULT_SEGMENT_COUNT = 4` and `USER_MAX_SEGMENT_COUNT = 8`. Flutter settings and bridge wiring are still pending.
 - Do not promise a fixed speed multiplier. Server limits, connection quality, disk speed, and host throttling determine actual gains.
 
 ## Segment layout and persistence
@@ -96,8 +97,9 @@ macOS is a planned additional desktop target, not currently supported by the man
 
 ## Rollout
 
-1. Land this specification and tests for range arithmetic/response validation.
-2. Implement the Rust segmented transfer module behind a conservative capability gate.
-3. Integrate pause/resume/cancel and aggregate progress with the existing task controls.
-4. Run the full CI matrix and deterministic local-server tests.
-5. Enable by default only after measured verification on Windows, Linux, and Android; retain single-connection fallback for unsupported servers.
+1. Land the specification and tests for range arithmetic/response validation. (Done.)
+2. Implement the Rust range probe, manifest model, validated segment worker, and bounded parallel orchestration. (Initial implementation done; CI verification pending.)
+3. Add durable per-segment recovery, request fingerprinting, and restart-safe manifest persistence.
+4. Integrate the 4-to-8 user setting, pause/resume/cancel, and aggregate progress through the Flutter-Rust bridge and UI.
+5. Complete failure/retry/assembly tests and run the full CI matrix.
+6. Enable by default only after measured verification on Windows, Linux, and Android; retain single-connection fallback for unsupported servers.
