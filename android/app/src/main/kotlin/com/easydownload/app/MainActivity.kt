@@ -132,6 +132,14 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "cancelDownload" -> {
+                        val taskId = call.argument<String>("taskId")
+                        if (taskId.isNullOrBlank()) {
+                            result.error("INVALID_ARGUMENT", "A download task ID is required.", null)
+                        } else {
+                            result.success(YoutubeDL.getInstance().destroyProcessById(taskId))
+                        }
+                    }
                     "inspectFormats" -> ytDlpExecutor.execute {
                         try {
                             val sourceUrl = call.argument<String>("sourceUrl")
@@ -188,6 +196,11 @@ class MainActivity : FlutterActivity() {
                                 ?: throw IllegalArgumentException("A source URL is required.")
                             val formatId = call.argument<String>("formatId")
                                 ?: throw IllegalArgumentException("A format ID is required.")
+                            if (!formatId.matches(Regex("[A-Za-z0-9_.+-]{1,80}"))) {
+                                throw IllegalArgumentException("The selected format ID is invalid.")
+                            }
+                            val taskId = call.argument<String>("taskId")
+                                ?: throw IllegalArgumentException("A download task ID is required.")
                             val outputPath = call.argument<String>("outputPath")
                                 ?: throw IllegalArgumentException("An output path is required.")
                             val source = Uri.parse(sourceUrl)
@@ -209,8 +222,22 @@ class MainActivity : FlutterActivity() {
                                 addOption("--no-playlist")
                                 addOption("--no-part")
                                 addOption("--no-mtime")
+                                addOption("--newline")
                             }
-                            YoutubeDL.getInstance().execute(request)
+                            YoutubeDL.getInstance().execute(request, taskId, true) { percent, etaSeconds, line ->
+                                runOnUiThread {
+                                    MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, ytDlpAndroidChannel)
+                                        .invokeMethod(
+                                            "downloadProgress",
+                                            mapOf(
+                                                "taskId" to taskId,
+                                                "percent" to percent.toDouble().coerceIn(0.0, 100.0),
+                                                "etaSeconds" to etaSeconds,
+                                                "line" to line
+                                            )
+                                        )
+                                }
+                            }
                             if (!output.isFile || output.length() <= 0L) {
                                 throw IllegalStateException("yt-dlp finished without creating the expected output file.")
                             }
