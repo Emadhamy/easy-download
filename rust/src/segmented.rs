@@ -643,3 +643,167 @@ pub fn download_segment_to_part(
     }
     result
 }
+
+
+#[cfg(test)]
+mod worker_tests {
+    use super::{download_segment_to_part, ByteRange, RangeProbe, SegmentManifest};
+    use crate::DownloadControl;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn start_server(
+        status: &str,
+        content_range: Option<&str>,
+        etag: Option<&str>,
+        body: &'static [u8],
+        content_length: Option<usize>,
+    ) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let status = status.to_string();
+        let content_range = content_range.map(str::to_string);
+        let etag = etag.map(str::to_string);
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let count = stream.read(&mut buffer).unwrap();
+                if count == 0 { break; }
+                request.extend_from_slice(&buffer[..count]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") { break; }
+            }
+            let mut response = format!("HTTP/1.1 {status}\r\nConnection: close\r\n");
+            if let Some(length) = content_length {
+                response.push_str(&format!("Content-Length: {length}\r\n"));
+            }
+            if let Some(value) = content_range {
+                response.push_str(&format!("Content-Range: {value}\r\n"));
+            }
+            if let Some(value) = etag {
+                response.push_str(&format!("ETag: {value}\r\n"));
+            }
+            response.push_str("\r\n");
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+        });
+        (format!("http://{address}/segment.bin"), handle)
+    }
+
+    fn manifest() -> SegmentManifest {
+        SegmentManifest::new(&RangeProbe {
+            total_bytes: 4,
+            validator: "\"stable-v1\"".to_string(),
+            validator_is_etag: true,
+        }, 1).unwrap()
+    }
+
+    fn destination(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("easy-download-segment-{label}-{unique}.part"))
+    }
+
+    fn run_worker(
+        status: &str,
+        content_range: Option<&str>,
+        etag: Option<&str>,
+        body: &'static [u8],
+        content_length: Option<usize>,
+        label: &str,
+    ) -> (Result<u64, String>, std::path::PathBuf) {
+        let (url, server) = start_server(status, content_range, etag, body, content_length);
+        let path = destination(label);
+        let result = download_segment_to_part(&url, &manifest(), 0, &path, DownloadControl::new());
+        server.join().unwrap();
+        (result, path)
+    }
+
+    #[test]
+    fn worker_downloads_exact_range_and_atomically_creates_part_file() {
+        let (result, path) = run_worker(
+            "206 Partial Content", Some("bytes 0-3/4"), Some("\"stable-v1\""),
+            b"data", Some(4), "success",
+        );
+        assert_eq!(result.unwrap(), 4);
+        assert_eq!(std::fs::read(&path).unwrap(), b"data");
+        let mut temporary = path.as_os_str().to_os_string();
+        temporary.push(".easy-download.tmp");
+        assert!(!std::path::PathBuf::from(temporary).exists());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn worker_rejects_server_that_ignores_range() {
+        let (result, path) = run_worker("200 OK", None, Some("\"stable-v1\""), b"data", Some(4), "ignore-range");
+        assert!(result.is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn worker_rejects_mismatched_content_range_and_changed_validator() {
+        let (range_result, range_path) = run_worker(
+            "206 Partial Content", Some("bytes 1-4/5"), Some("\"stable-v1\""),
+            b"data", Some(4), "wrong-range",
+        );
+        assert!(range_result.is_err());
+        assert!(!range_path.exists());
+
+        let (validator_result, validator_path) = run_worker(
+            "206 Partial Content", Some("bytes 0-3/4"), Some("\"stable-v2\""),
+            b"data", Some(4), "changed-validator",
+        );
+        assert!(validator_result.is_err());
+        assert!(!validator_path.exists());
+    }
+
+    #[test]
+    fn worker_rejects_short_and_long_bodies_without_content_length() {
+        let (short_result, short_path) = run_worker(
+            "206 Partial Content", Some("bytes 0-3/4"), Some("\"stable-v1\""),
+            b"abc", None, "short",
+        );
+        assert!(short_result.is_err());
+        assert!(!short_path.exists());
+
+        let (long_result, long_path) = run_worker(
+            "206 Partial Content", Some("bytes 0-3/4"), Some("\"stable-v1\""),
+            b"abcde", None, "long",
+        );
+        assert!(long_result.is_err());
+        assert!(!long_path.exists());
+    }
+
+    #[test]
+    fn worker_cleans_staging_file_when_cancelled() {
+        let (url, server) = start_server(
+            "206 Partial Content", Some("bytes 0-3/4"), Some("\"stable-v1\""),
+            b"data", Some(4),
+        );
+        let path = destination("cancelled");
+        let control = DownloadControl::new();
+        control.cancel();
+        let result = download_segment_to_part(&url, &manifest(), 0, &path, control);
+        server.join().unwrap();
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert!(!path.exists());
+        let mut temporary = path.as_os_str().to_os_string();
+        temporary.push(".easy-download.tmp");
+        assert!(!std::path::PathBuf::from(temporary).exists());
+    }
+
+    #[test]
+    fn worker_rejects_out_of_range_segment_index_before_network_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let path = destination("bad-index");
+        let result = download_segment_to_part(
+            &format!("http://{address}/unused"), &manifest(), 1, &path, DownloadControl::new(),
+        );
+        assert!(result.is_err());
+        assert!(!path.exists());
+        drop(listener);
+    }
+}
