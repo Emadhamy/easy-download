@@ -807,3 +807,225 @@ mod worker_tests {
         drop(listener);
     }
 }
+
+
+/// Default user-facing number of parallel segments per direct download.
+pub const DEFAULT_SEGMENT_COUNT: usize = 4;
+/// User-selectable upper bound for parallel segments per direct download.
+pub const USER_MAX_SEGMENT_COUNT: usize = 8;
+/// Number of attempts per segment, including the first request.
+const SEGMENT_ATTEMPTS: usize = 3;
+
+/// Downloads all segments concurrently, retries failed segments, and assembles
+/// the verified parts in order into the destination only after every worker
+/// succeeds. The caller may select 4 through 8 segments; four is the default.
+///
+/// Progress is reported whenever a complete segment is safely written. The
+/// callback receives completed segments, total segments, completed bytes, and
+/// total bytes. This first orchestration layer deliberately keeps recovery
+/// metadata out of scope; durable per-segment restart recovery is a later step.
+pub fn download_segmented_to_path<F>(
+    input_url: &str,
+    manifest: &SegmentManifest,
+    destination: impl AsRef<std::path::Path>,
+    segment_count: usize,
+    control: crate::DownloadControl,
+    mut on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(usize, usize, u64, u64),
+{
+    use std::fs::{self, File, OpenOptions};
+    use std::io::{Read, Write};
+    use std::sync::mpsc;
+
+    if !(DEFAULT_SEGMENT_COUNT..=USER_MAX_SEGMENT_COUNT).contains(&segment_count) {
+        return Err(format!(
+            "Parallel segment count must be between {DEFAULT_SEGMENT_COUNT} and {USER_MAX_SEGMENT_COUNT}"
+        ));
+    }
+    manifest.validate()?;
+    if manifest.segments.len() != segment_count {
+        return Err("Segment count does not match the validated manifest".to_string());
+    }
+    let url = DownloadUrl::parse(input_url)?;
+    let destination = destination.as_ref();
+    if destination.exists() {
+        return Err("Destination already exists; refusing to overwrite an existing file".to_string());
+    }
+    let parent = destination.parent().filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    if !parent.is_dir() {
+        return Err("Destination directory does not exist".to_string());
+    }
+
+    let mut part_paths = Vec::with_capacity(segment_count);
+    for index in 0..segment_count {
+        let mut name = destination.as_os_str().to_os_string();
+        name.push(format!(".segment-{index}.part"));
+        part_paths.push(std::path::PathBuf::from(name));
+    }
+    let mut assembly_name = destination.as_os_str().to_os_string();
+    assembly_name.push(".easy-download.assembling");
+    let assembly_path = std::path::PathBuf::from(assembly_name);
+
+    // Never reuse untrusted leftovers from a prior attempt. Durable recovery
+    // will add a request fingerprint and verified sidecar before reusing parts.
+    for path in &part_paths {
+        if path.exists() {
+            return Err("A segment part already exists; clean up or recover it before retrying".to_string());
+        }
+    }
+    if assembly_path.exists() {
+        return Err("An assembly staging file already exists".to_string());
+    }
+
+    let shared_control = control.clone();
+    let (sender, receiver) = mpsc::channel();
+    let mut first_error: Option<String> = None;
+    let mut completed_segments = 0_usize;
+    let mut completed_bytes = 0_u64;
+
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(segment_count);
+        for (index, part_path) in part_paths.iter().cloned().enumerate() {
+            let sender = sender.clone();
+            let worker_url = url.as_str().to_string();
+            let worker_manifest = manifest.clone();
+            let worker_control = shared_control.clone();
+            handles.push(scope.spawn(move || {
+                let mut last_error = None;
+                for attempt in 1..=SEGMENT_ATTEMPTS {
+                    if worker_control.wait_until_running().is_err() {
+                        last_error = Some("Download cancelled".to_string());
+                        break;
+                    }
+                    if part_path.exists() {
+                        let _ = fs::remove_file(&part_path);
+                    }
+                    match download_segment_to_part(
+                        &worker_url,
+                        &worker_manifest,
+                        index,
+                        &part_path,
+                        worker_control.clone(),
+                    ) {
+                        Ok(bytes) => {
+                            let _ = sender.send((index, Ok(bytes)));
+                            return;
+                        }
+                        Err(error) => {
+                            last_error = Some(error);
+                            if attempt < SEGMENT_ATTEMPTS {
+                                // A failed attempt must not leave a partial part.
+                                let _ = fs::remove_file(&part_path);
+                            }
+                        }
+                    }
+                }
+                let _ = sender.send((
+                    index,
+                    Err(last_error.unwrap_or_else(|| "Segment failed without an error detail".to_string())),
+                ));
+            }));
+        }
+        drop(sender);
+
+        for _ in 0..segment_count {
+            match receiver.recv() {
+                Ok((_index, Ok(bytes))) => {
+                    completed_segments += 1;
+                    completed_bytes = completed_bytes.saturating_add(bytes);
+                    on_progress(
+                        completed_segments,
+                        segment_count,
+                        completed_bytes,
+                        manifest.total_bytes,
+                    );
+                }
+                Ok((_index, Err(error))) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                    shared_control.cancel();
+                }
+                Err(_) => {
+                    if first_error.is_none() {
+                        first_error = Some("A segment worker stopped unexpectedly".to_string());
+                    }
+                    shared_control.cancel();
+                    break;
+                }
+            }
+        }
+        for handle in handles {
+            if handle.join().is_err() && first_error.is_none() {
+                first_error = Some("A segment worker panicked".to_string());
+                shared_control.cancel();
+            }
+        }
+    });
+
+    if let Some(error) = first_error {
+        for path in &part_paths { let _ = fs::remove_file(path); }
+        let _ = fs::remove_file(&assembly_path);
+        return Err(error);
+    }
+    if completed_segments != segment_count || completed_bytes != manifest.total_bytes {
+        for path in &part_paths { let _ = fs::remove_file(path); }
+        return Err("Completed segment byte count does not match the original file".to_string());
+    }
+
+    let assembly_result = (|| {
+        let mut output = OpenOptions::new().write(true).create_new(true)
+            .open(&assembly_path)
+            .map_err(|error| format!("Could not create assembly staging file: {error}"))?;
+        let mut assembled_bytes = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        for (index, part_path) in part_paths.iter().enumerate() {
+            control.wait_until_running()?;
+            let expected = manifest.segments[index].range.len();
+            let mut input = File::open(part_path)
+                .map_err(|error| format!("Could not open completed segment {index}: {error}"))?;
+            let mut part_bytes = 0_u64;
+            loop {
+                let count = input.read(&mut buffer)
+                    .map_err(|error| format!("Could not read completed segment {index}: {error}"))?;
+                if count == 0 { break; }
+                part_bytes = part_bytes.checked_add(count as u64)
+                    .ok_or_else(|| "Segment assembly byte counter overflowed".to_string())?;
+                if part_bytes > expected {
+                    return Err(format!("Segment {index} exceeds its expected length"));
+                }
+                output.write_all(&buffer[..count])
+                    .map_err(|error| format!("Could not assemble segment {index}: {error}"))?;
+            }
+            if part_bytes != expected {
+                return Err(format!("Segment {index} has {part_bytes} bytes; expected {expected}"));
+            }
+            assembled_bytes = assembled_bytes.checked_add(part_bytes)
+                .ok_or_else(|| "Final assembly byte counter overflowed".to_string())?;
+        }
+        output.flush().and_then(|_| output.sync_all())
+            .map_err(|error| format!("Could not sync assembled download: {error}"))?;
+        drop(output);
+        if assembled_bytes != manifest.total_bytes {
+            return Err(format!(
+                "Assembled file has {assembled_bytes} bytes; expected {}",
+                manifest.total_bytes
+            ));
+        }
+        fs::rename(&assembly_path, destination)
+            .map_err(|error| format!("Could not finalize assembled download: {error}"))?;
+        Ok(assembled_bytes)
+    })();
+
+    if assembly_result.is_ok() {
+        for path in &part_paths { let _ = fs::remove_file(path); }
+    } else {
+        let _ = fs::remove_file(&assembly_path);
+        // Keep complete verified parts if assembly fails so a later recovery
+        // implementation can preserve useful work; do not create a final file.
+    }
+    assembly_result
+}
