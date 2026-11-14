@@ -18,6 +18,7 @@ pub struct VideoFormatOption {
     pub filesize: Option<u64>,
     pub filesize_approx: Option<u64>,
     pub format_note: Option<String>,
+    pub audio_bitrate: Option<f64>,
     pub has_video: bool,
     pub has_audio: bool,
     pub vcodec: Option<String>,
@@ -89,6 +90,7 @@ pub fn formats_from_metadata(metadata_json: &str) -> Result<String, String> {
             filesize: number_u64(raw.get("filesize")),
             filesize_approx: number_u64(raw.get("filesize_approx")),
             format_note: non_empty_string(raw.get("format_note")),
+            audio_bitrate: raw.get("abr").and_then(Value::as_f64),
             has_video,
             has_audio,
             vcodec,
@@ -135,7 +137,7 @@ mod tests {
             "formats":[
                 {"format_id":"18","ext":"mp4","height":360,"vcodec":"avc1","acodec":"mp4a","url":"https://secret.invalid/media"},
                 {"format_id":"137","ext":"mp4","height":1080,"vcodec":"avc1","acodec":"none","filesize":1200},
-                {"format_id":"140","ext":"m4a","vcodec":"none","acodec":"mp4a"},
+                {"format_id":"140","ext":"m4a","vcodec":"none","acodec":"mp4a","abr":128.0},
                 {"format_id":"drm","ext":"mp4","vcodec":"avc1","acodec":"none","has_drm":true},
                 {"format_id":"storyboard","ext":"mhtml","vcodec":"none","acodec":"none"}
             ]
@@ -150,6 +152,7 @@ mod tests {
         assert!(parsed["formats"][0]["hasVideo"].as_bool().unwrap());
         assert!(!parsed["formats"][0]["hasAudio"].as_bool().unwrap());
         assert!(parsed["formats"][2]["hasAudio"].as_bool().unwrap());
+        assert_eq!(parsed["formats"][2]["audioBitrate"], 128.0);
         assert!(!output.contains("secret.invalid"));
         assert!(!output.contains("storyboard"));
         assert!(!output.contains("drm"));
