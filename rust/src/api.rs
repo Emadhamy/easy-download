@@ -224,6 +224,27 @@ pub fn yt_dlp_install_latest_release(
         .map_err(|error| format!("Could not encode installed yt-dlp metadata: {error}"))
 }
 
+
+/// Returns the active verified yt-dlp installation for this desktop target.
+#[frb]
+pub fn yt_dlp_get_active_installation(install_root: String) -> Result<String, String> {
+    let target = Target::current()
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))?;
+    let active = crate::yt_dlp_installer::active_installation(install_root, &target.key())?;
+    serde_json::to_string(&active)
+        .map_err(|error| format!("Could not encode active yt-dlp metadata: {error}"))
+}
+
+/// Restores the previous verified yt-dlp version without changing FFmpeg.
+#[frb]
+pub fn yt_dlp_rollback(install_root: String) -> Result<String, String> {
+    let target = Target::current()
+        .map_err(|error| format!("Unsupported application platform: {error:?}"))?;
+    let active = crate::yt_dlp_installer::rollback(install_root, &target.key())?;
+    serde_json::to_string(&active)
+        .map_err(|error| format!("Could not encode rolled-back yt-dlp metadata: {error}"))
+}
+
 /// Inspects a source and returns safe, normalized video/audio format choices.
 /// Signed media URLs and DRM-only formats are not exposed to Flutter.
 #[frb]
