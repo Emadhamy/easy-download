@@ -379,6 +379,83 @@ where
     result
 }
 
+
+
+fn read_pointer(path: &Path, label: &str) -> Result<ActiveYtDlp, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("Could not inspect {label} yt-dlp pointer: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 16 * 1024 {
+        return Err(format!("{label} yt-dlp pointer must be a small regular file"));
+    }
+    serde_json::from_slice(&fs::read(path)
+        .map_err(|error| format!("Could not read {label} yt-dlp pointer: {error}"))?)
+        .map_err(|error| format!("{label} yt-dlp pointer is invalid: {error}"))
+}
+
+fn resolve_installed(root: &Path, active: &ActiveYtDlp, target: &str) -> Result<PathBuf, String> {
+    if !valid_version(&active.version) || active.asset_name != expected_asset(target)? {
+        return Err("Installed yt-dlp metadata does not match this platform".to_string());
+    }
+    if !validate_digest(&active.sha256) {
+        return Err("Installed yt-dlp metadata has an invalid SHA-256 digest".to_string());
+    }
+    let relative = Path::new(&active.executable_path);
+    let components: Vec<_> = relative.components().collect();
+    if components.len() != 3
+        || components[0].as_os_str() != "versions"
+        || components[1].as_os_str() != active.version
+        || components[2].as_os_str() != active.asset_name
+    {
+        return Err("Installed yt-dlp executable path does not match the managed layout".to_string());
+    }
+    let versions_dir = root.join("versions");
+    reject_symlink_directory(&versions_dir, "yt-dlp versions")?;
+    let version_dir = versions_dir.join(&active.version);
+    reject_symlink_directory(&version_dir, "yt-dlp version")?;
+    let executable = version_dir.join(&active.asset_name);
+    let metadata = fs::symlink_metadata(&executable)
+        .map_err(|error| format!("Could not access installed yt-dlp executable: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("Installed yt-dlp executable is not a regular file".to_string());
+    }
+    let actual_hash = hash_file(&executable)?;
+    if !actual_hash.eq_ignore_ascii_case(&active.sha256) {
+        return Err("Installed yt-dlp executable does not match its active SHA-256".to_string());
+    }
+    verify_executable(&executable, &active.version)?;
+    Ok(executable)
+}
+
+/// Returns the active installation after validating its path, digest, and executable version.
+pub fn active_installation(install_root: impl AsRef<Path>, target: &str) -> Result<ActiveYtDlp, String> {
+    let root = install_root.as_ref();
+    if !root.is_absolute() {
+        return Err("The yt-dlp install directory must be absolute".to_string());
+    }
+    reject_symlink_directory(root, "yt-dlp install root")?;
+    let active = read_pointer(&root.join("active.json"), "active")?;
+    resolve_installed(root, &active, target)?;
+    Ok(active)
+}
+
+/// Atomically swaps active and previous yt-dlp versions after validating both binaries.
+pub fn rollback(install_root: impl AsRef<Path>, target: &str) -> Result<ActiveYtDlp, String> {
+    let root = install_root.as_ref();
+    if !root.is_absolute() {
+        return Err("The yt-dlp install directory must be absolute".to_string());
+    }
+    reject_symlink_directory(root, "yt-dlp install root")?;
+    let active_path = root.join("active.json");
+    let previous_path = root.join("previous.json");
+    let current = read_pointer(&active_path, "active")?;
+    let previous = read_pointer(&previous_path, "previous")?;
+    resolve_installed(root, &previous, target)?;
+    resolve_installed(root, &current, target)?;
+    write_json_atomically(&active_path, &previous)?;
+    write_json_atomically(&previous_path, &current)?;
+    Ok(previous)
+}
+
 fn hash_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path)
         .map_err(|error| format!("Could not open installed yt-dlp binary for hashing: {error}"))?;
@@ -495,4 +572,53 @@ mod tests {
         assert!(verify_executable(&path, "2026.10.27").is_err());
         std::fs::remove_file(path).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_validates_both_binaries_and_swaps_pointers() {
+        use super::{hash_file, rollback, set_executable_permissions, ActiveYtDlp};
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_path("rollback");
+        let versions = root.join("versions");
+        std::fs::create_dir_all(&versions).unwrap();
+
+        let make_install = |version: &str| {
+            let directory = versions.join(version);
+            std::fs::create_dir_all(&directory).unwrap();
+            let executable = directory.join("yt-dlp_linux");
+            std::fs::write(
+                &executable,
+                format!("#!/bin/sh\nprintf '{}\\n'\n", version),
+            ).unwrap();
+            let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(&executable, permissions).unwrap();
+            set_executable_permissions(&executable).unwrap();
+            ActiveYtDlp {
+                version: version.to_string(),
+                asset_name: "yt-dlp_linux".to_string(),
+                executable_path: format!("versions/{version}/yt-dlp_linux"),
+                sha256: hash_file(&executable).unwrap(),
+            }
+        };
+
+        let current = make_install("2026.10.27");
+        let previous = make_install("2026.10.26");
+        write_json_atomically(&root.join("active.json"), &current).unwrap();
+        write_json_atomically(&root.join("previous.json"), &previous).unwrap();
+
+        let restored = rollback(&root, "linux-x86_64").unwrap();
+        assert_eq!(restored.version, "2026.10.26");
+        let active: ActiveYtDlp = serde_json::from_slice(
+            &std::fs::read(root.join("active.json")).unwrap(),
+        ).unwrap();
+        let saved_previous: ActiveYtDlp = serde_json::from_slice(
+            &std::fs::read(root.join("previous.json")).unwrap(),
+        ).unwrap();
+        assert_eq!(active.version, "2026.10.26");
+        assert_eq!(saved_previous.version, "2026.10.27");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
 }
