@@ -77,6 +77,16 @@ Stream<String> ytDlpInstallLatestRelease({required String installRoot}) =>
       installRoot: installRoot,
     );
 
+/// Returns the active verified yt-dlp installation for this desktop target.
+Future<String> ytDlpGetActiveInstallation({required String installRoot}) =>
+    RustLib.instance.api.crateApiYtDlpGetActiveInstallation(
+      installRoot: installRoot,
+    );
+
+/// Restores the previous verified yt-dlp version without changing FFmpeg.
+Future<String> ytDlpRollback({required String installRoot}) =>
+    RustLib.instance.api.crateApiYtDlpRollback(installRoot: installRoot);
+
 /// Inspects a source and returns safe, normalized video/audio format choices.
 /// Signed media URLs and DRM-only formats are not exposed to Flutter.
 Future<String> ytDlpInspectFormats({

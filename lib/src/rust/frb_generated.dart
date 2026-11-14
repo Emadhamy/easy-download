@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1346697281;
+  int get rustContentHash => 2123893346;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -158,6 +158,10 @@ abstract class RustLibApi extends BaseApi {
     required String outputTemplate,
   });
 
+  Future<String> crateApiYtDlpGetActiveInstallation({
+    required String installRoot,
+  });
+
   Future<String> crateApiYtDlpGetVersion({required String executablePath});
 
   Future<String> crateApiYtDlpInspectFormats({
@@ -179,6 +183,8 @@ abstract class RustLibApi extends BaseApi {
     required String sourceUrl,
     required String formatId,
   });
+
+  Future<String> crateApiYtDlpRollback({required String installRoot});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -926,6 +932,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiYtDlpGetActiveInstallation({
+    required String installRoot,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(installRoot, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 21,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiYtDlpGetActiveInstallationConstMeta,
+        argValues: [installRoot],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiYtDlpGetActiveInstallationConstMeta =>
+      const TaskConstMeta(
+        debugName: "yt_dlp_get_active_installation",
+        argNames: ["installRoot"],
+      );
+
+  @override
   Future<String> crateApiYtDlpGetVersion({required String executablePath}) {
     return handler.executeNormal(
       NormalTask(
@@ -935,7 +974,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 22,
             port: port_,
           );
         },
@@ -969,7 +1008,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 23,
             port: port_,
           );
         },
@@ -1004,7 +1043,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 24,
             port: port_,
           );
         },
@@ -1039,7 +1078,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 24,
+              funcId: 25,
               port: port_,
             );
           },
@@ -1078,7 +1117,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1098,6 +1137,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         debugName: "yt_dlp_resolve_format_request",
         argNames: ["executablePath", "sourceUrl", "formatId"],
       );
+
+  @override
+  Future<String> crateApiYtDlpRollback({required String installRoot}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(installRoot, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 27,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiYtDlpRollbackConstMeta,
+        argValues: [installRoot],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiYtDlpRollbackConstMeta => const TaskConstMeta(
+    debugName: "yt_dlp_rollback",
+    argNames: ["installRoot"],
+  );
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
