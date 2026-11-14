@@ -67,7 +67,9 @@ This roadmap distinguishes code that is already present from work that still nee
 - [ ] Add BitTorrent support.
 - [ ] Add browser link handoff and browser integration.
 - [x] Receive shared HTTP(S) URLs from other apps through Android Share sheet, including cold-start and already-running app delivery.
-- [ ] Inspect shared video URLs on Android and present source-derived video/audio format and quality options.
+- [x] Inspect shared video URLs on Android with the bundled yt-dlp runtime and present source-derived combined video/audio quality options.
+- [x] Route selected combined video formats on Android through the native yt-dlp runtime into app-private storage before the existing Android save-folder handoff.
+- [ ] Add source-derived audio-only quality options and verified MP3 conversion on Android after the independent FFmpeg runtime is integrated.
 - [ ] Design and implement the floating video-capture indicator.
 - [ ] Add polished platform-specific UX and accessibility improvements.
 
