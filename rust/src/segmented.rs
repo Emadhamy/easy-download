@@ -4,6 +4,12 @@
 //! range arithmetic isolated makes boundary conditions easy to test before
 //! introducing concurrent transfer workers.
 
+use crate::DownloadUrl;
+use reqwest::blocking::Client;
+use reqwest::header::{ETAG, LAST_MODIFIED, RANGE};
+use reqwest::StatusCode;
+use std::io::Read;
+
 /// Maximum number of byte-range segments allowed for one file.
 pub const MAX_SEGMENTS_PER_FILE: usize = 8;
 
@@ -79,6 +85,67 @@ impl ContentRange {
         }
         Ok(())
     }
+}
+
+/// Stable metadata required before enabling parallel range downloads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeProbe {
+    pub total_bytes: u64,
+    pub validator: String,
+    pub validator_is_etag: bool,
+}
+
+/// Probes a server with GET Range: bytes=0-0. Unsupported or unverifiable
+/// servers return an error so callers can safely fall back to single-stream
+/// downloads instead of guessing.
+pub fn probe_range_support(input_url: &str) -> Result<RangeProbe, String> {
+    let url = DownloadUrl::parse(input_url)?;
+    let mut builder = Client::builder();
+    #[cfg(test)]
+    {
+        builder = builder.no_proxy();
+    }
+    let client = builder.build()
+        .map_err(|error| format!("Could not create HTTP client: {error}"))?;
+    let mut response = client.get(url.as_str())
+        .header(RANGE, "bytes=0-0")
+        .send()
+        .map_err(|error| format!("Range capability probe failed: {error}"))?;
+
+    if response.status() != StatusCode::PARTIAL_CONTENT {
+        return Err(format!("Server does not support byte ranges (HTTP {})", response.status()));
+    }
+    let header = response.headers().get(reqwest::header::CONTENT_RANGE)
+        .ok_or_else(|| "Range probe response omitted Content-Range".to_string())?
+        .to_str()
+        .map_err(|_| "Range probe returned an invalid Content-Range".to_string())?;
+    let parsed = ContentRange::parse(header)?;
+    parsed.validate(ByteRange { start: 0, end: 0 }, parsed.total)?;
+
+    let (validator, validator_is_etag) = if let Some(etag) = response.headers().get(ETAG) {
+        let value = etag.to_str().map_err(|_| "Invalid ETag header".to_string())?;
+        if value.trim_start().starts_with("W/") {
+            return Err("Weak ETag cannot safely validate parallel segments".to_string());
+        }
+        (value.to_string(), true)
+    } else if let Some(modified) = response.headers().get(LAST_MODIFIED) {
+        (modified.to_str().map_err(|_| "Invalid Last-Modified header".to_string())?.to_string(), false)
+    } else {
+        return Err("Server provided no stable ETag or Last-Modified validator".to_string());
+    };
+
+    let mut probe_byte = [0_u8; 1];
+    let received = response.read(&mut probe_byte)
+        .map_err(|error| format!("Could not read range probe body: {error}"))?;
+    if received != 1 {
+        return Err("Range probe did not return exactly one byte".to_string());
+    }
+
+    Ok(RangeProbe {
+        total_bytes: parsed.total,
+        validator,
+        validator_is_etag,
+    })
 }
 
 /// Divides a known positive file length into contiguous, non-overlapping
