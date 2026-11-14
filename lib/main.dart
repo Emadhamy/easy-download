@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'src/utils/download_helpers.dart';
+import 'src/utils/shared_url_parser.dart';
 import 'src/storage/download_history_store.dart';
 import 'src/theme/easy_download_theme.dart';
 import 'src/rust/api.dart' as rust_api;
@@ -162,6 +163,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   static const _downloadDirectoryKey = 'easy_download_directory_v1';
   static const _androidDirectoryKey = 'easy_download_android_tree_uri_v1';
   static const _storageChannel = MethodChannel('com.easydownload/storage');
+  static const _shareIntentsChannel = MethodChannel('com.easydownload/share_intents');
   static const _ytDlpAndroidChannel = MethodChannel('com.easydownload/ytdlp_android');
   String? _downloadDirectoryPath;
   String? _androidDownloadTreeUri;
@@ -211,6 +213,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   void initState() {
     super.initState();
     _loadHistory();
+    _shareIntentsChannel.setMethodCallHandler((call) async {
+      if (call.method == "sharedContentReceived") {
+        await _handleSharedContent(call.arguments as String?);
+      }
+    });
+    unawaited(_loadInitialSharedContent());
     unawaited(_initializeYtDlpManager());
     unawaited(_initializeFfmpegManager());
   }
@@ -220,6 +228,51 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     _ytDlpUpdateTimer?.cancel();
     _ffmpegUpdateTimer?.cancel();
     super.dispose();
+  }
+
+
+  Future<void> _loadInitialSharedContent() async {
+    try {
+      final shared = await _shareIntentsChannel.invokeMethod<String>('getInitialSharedContent');
+      if (shared != null) await _handleSharedContent(shared);
+    } on PlatformException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not receive shared link: ${error.message ?? error.code}')),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleSharedContent(String? sharedText) async {
+    final uri = extractSharedHttpUrl(sharedText);
+    if (!mounted) return;
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The shared content does not contain a valid HTTP(S) link.')),
+      );
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Video link received'),
+        content: SelectableText(uri.toString()),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: uri.toString()));
+              Navigator.of(dialogContext).pop();
+            },
+            child: const Text('Copy link'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   bool get _ytDlpSupported => Platform.isWindows || Platform.isLinux;
