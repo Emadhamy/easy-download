@@ -1757,24 +1757,24 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         }
 
         await for (final event in rust_api.downloadFileResumableControlledWithHeaders(
-        taskId: taskId,
-        inputUrl: transferUrl,
-        headersJson: transferHeadersJson,
+          taskId: taskId,
+          inputUrl: transferUrl,
+          headersJson: transferHeadersJson,
           destinationPath: destination,
         )) {
           final progress = jsonDecode(event) as Map<String, dynamic>;
-        final received = (progress['received'] as num).toInt();
-        final total = (progress['total'] as num?)?.toInt();
-        final now = DateTime.now();
-        final elapsed = now.difference(previousTime).inMilliseconds / 1000;
-        final speed = elapsed > 0 ? (received - previousBytes) / elapsed : 0.0;
-        previousBytes = received;
-        previousTime = now;
-        if (!mounted) return;
-        setState(() {
-          link.receivedBytes = received;
-          link.totalBytes = total;
-          link.speedBytesPerSecond = speed < 0 ? 0 : speed;
+          final received = (progress['received'] as num).toInt();
+          final total = (progress['total'] as num?)?.toInt();
+          final now = DateTime.now();
+          final elapsed = now.difference(previousTime).inMilliseconds / 1000;
+          final speed = elapsed > 0 ? (received - previousBytes) / elapsed : 0.0;
+          previousBytes = received;
+          previousTime = now;
+          if (!mounted) return;
+          setState(() {
+            link.receivedBytes = received;
+            link.totalBytes = total;
+            link.speedBytesPerSecond = speed < 0 ? 0 : speed;
           });
         }
       }
@@ -1932,7 +1932,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         : '${hours}h ${remainingMinutes}m left';
   }
 
-  Future<void> _addVideoLink() async {
+  Future<void> _addVideoLink({String? initialUrl}) async {
     if (!_ytDlpManagerSupported) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('yt-dlp video downloads are not available on this platform.')),
@@ -1946,7 +1946,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       return;
     }
 
-    final controller = TextEditingController();
+    final controller = TextEditingController(text: initialUrl ?? '');
     String? errorText;
     bool inspecting = false;
     List<Map<String, dynamic>> formats = [];
