@@ -165,8 +165,9 @@ class MainActivity : FlutterActivity() {
                                 val audioCodec = item.optString("acodec", "none")
                                 val hasVideo = videoCodec.isNotBlank() && videoCodec != "none"
                                 val hasAudio = audioCodec.isNotBlank() && audioCodec != "none"
-                                // The current Android transfer path supports a single combined stream.
-                                if (!hasVideo || !hasAudio) continue
+                                // Expose directly downloadable combined video and audio-only formats.
+                                // Video-only streams are withheld until FFmpeg can safely merge them.
+                                if ((!hasVideo || !hasAudio) && (hasVideo || !hasAudio)) continue
                                 val height = item.optInt("height", 0)
                                 val resolution = item.optString("resolution").takeIf { it.isNotBlank() && it != "NA" }
                                     ?: if (height > 0) "${height}p" else "Unknown quality"
@@ -179,6 +180,7 @@ class MainActivity : FlutterActivity() {
                                     .put("filesizeApprox", item.optLong("filesize_approx", -1).takeIf { it > 0 })
                                     .put("hasVideo", hasVideo)
                                     .put("hasAudio", hasAudio)
+                                    .put("audioBitrate", item.optDouble("abr").takeIf { !it.isNaN() && it > 0 })
                                     .put("formatNote", item.optString("format_note"))
                                 formats.put(format)
                             }
