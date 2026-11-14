@@ -209,24 +209,35 @@ class MainActivity : FlutterActivity() {
                             if ((source.scheme != "http" && source.scheme != "https") || source.host.isNullOrBlank()) {
                                 throw IllegalArgumentException("Only valid HTTP(S) video URLs are supported.")
                             }
-                            val output = File(outputPath).canonicalFile
+                            val requestedOutput = File(outputPath).canonicalFile
                             // Flutter's Android documents directory (app_flutter) is a sibling of files/.
                             // Keep writes inside the app's private data directory while allowing that location.
                             val appRoot = requireNotNull(applicationContext.filesDir.parentFile).canonicalFile
-                            if (!output.path.startsWith(appRoot.path + File.separator)) {
+                            if (!requestedOutput.path.startsWith(appRoot.path + File.separator)) {
                                 throw IllegalArgumentException("The output path must stay inside Easy Download's private storage.")
                             }
-                            output.parentFile?.mkdirs()
+                            val outputDirectory = requestedOutput.parentFile
+                                ?: throw IllegalArgumentException("The output directory is missing.")
+                            if (!outputDirectory.exists() && !outputDirectory.mkdirs()) {
+                                throw IllegalStateException("Could not create the download directory.")
+                            }
+                            // Let yt-dlp choose the final extension from the selected format metadata.
+                            // The actual post-processing path is returned through ED_FILE below.
+                            val outputTemplate = File(
+                                outputDirectory,
+                                "${requestedOutput.nameWithoutExtension}.%(ext)s"
+                            ).absolutePath
                             YoutubeDL.getInstance().init(applicationContext)
                             val request = YoutubeDLRequest(sourceUrl).apply {
                                 addOption("-f", formatId)
-                                addOption("-o", output.absolutePath)
+                                addOption("-o", outputTemplate)
                                 addOption("--no-playlist")
                                 addOption("--no-part")
                                 addOption("--no-mtime")
                                 addOption("--newline")
+                                addOption("--print", "after_move:ED_FILE:%(filepath)s")
                             }
-                            YoutubeDL.getInstance().execute(request, taskId, true) { percent, etaSeconds, line ->
+                            val response = YoutubeDL.getInstance().execute(request, taskId, true) { percent, etaSeconds, line ->
                                 runOnUiThread {
                                     ytDlpMethodChannel.invokeMethod(
                                             "downloadProgress",
@@ -239,8 +250,21 @@ class MainActivity : FlutterActivity() {
                                         )
                                 }
                             }
+                            val reportedPath = response.out.lineSequence()
+                                .mapNotNull { line ->
+                                    line.takeIf { it.startsWith("ED_FILE:") }
+                                        ?.removePrefix("ED_FILE:")
+                                        ?.trim()
+                                        ?.takeIf { it.isNotEmpty() }
+                                }
+                                .lastOrNull()
+                                ?: throw IllegalStateException("yt-dlp completed without reporting the output file.")
+                            val output = File(reportedPath).canonicalFile
+                            if (!output.path.startsWith(appRoot.path + File.separator)) {
+                                throw IllegalStateException("yt-dlp reported a file outside Easy Download's private storage.")
+                            }
                             if (!output.isFile || output.length() <= 0L) {
-                                throw IllegalStateException("yt-dlp finished without creating the expected output file.")
+                                throw IllegalStateException("yt-dlp reported an output file that is missing or empty.")
                             }
                             runOnUiThread { result.success(output.absolutePath) }
                         } catch (error: Exception) {
