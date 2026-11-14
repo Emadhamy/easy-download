@@ -130,6 +130,28 @@ jobs:
       - name: Build Android APK
         run: flutter build apk --debug --target-platform android-arm64
 
+      - name: Install NDK r28 and Android build tools for native audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(find "$SDK_ROOT" -type f -name sdkmanager -perm -u+x -print -quit)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager was not found under $SDK_ROOT"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" --install "ndk;28.0.12433566" "build-tools;36.0.0"
+          echo "ANDROID_NDK_AUDIT_HOME=$SDK_ROOT/ndk/28.0.12433566" >> "$GITHUB_ENV"
+          echo "ANDROID_BUILD_TOOLS=$SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_ENV"
+
+      - name: Audit every Android native library for 16 KB compatibility
+        run: |
+          python3 .github/scripts/check_android_16kb_alignment.py \
+            --apk build/app/outputs/flutter-apk/app-debug.apk \
+            --readelf "$ANDROID_NDK_AUDIT_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+            --zipalign "$ANDROID_BUILD_TOOLS/zipalign"
+
 
   windows-rust-check:
     name: Windows native Rust tests
