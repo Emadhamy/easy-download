@@ -1916,6 +1916,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _cancelDownload(_LinkDraft link) async {
     final taskId = link.taskId;
     if (taskId == null || !link.isDownloading) return;
+
+    // Mark cancellation before stopping the native process. yt-dlp may report
+    // its termination to _download before the cancel method call returns.
+    if (mounted) setState(() => link.isCancelled = true);
     try {
       if (Platform.isAndroid && link.ytDlpFormatId != null) {
         final cancelled = await _ytDlpAndroidChannel.invokeMethod<bool>(
@@ -1928,7 +1932,6 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       } else {
         await rust_api.cancelDownload(taskId: taskId);
       }
-      link.isCancelled = true;
       if (mounted) {
         setState(() {
           _links.remove(link);
@@ -1939,7 +1942,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         await _saveHistory();
       }
     } catch (_) {
+      // A failed cancellation must not leave the item marked as cancelled.
       if (mounted) {
+        setState(() => link.isCancelled = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not cancel this download.')),
         );
