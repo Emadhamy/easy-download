@@ -14,7 +14,7 @@ use std::io::Read;
 pub const MAX_SEGMENTS_PER_FILE: usize = 8;
 
 /// An inclusive HTTP byte range.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ByteRange {
     pub start: u64,
     pub end: u64,
@@ -494,5 +494,56 @@ impl SegmentManifest {
             }
         }
         Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::{ByteRange, RangeProbe, SegmentManifest};
+
+    fn sample_manifest() -> SegmentManifest {
+        SegmentManifest::new(&RangeProbe {
+            total_bytes: 100,
+            validator: "\"stable-v1\"".to_string(),
+            validator_is_etag: true,
+        }, 4).unwrap()
+    }
+
+    #[test]
+    fn manifest_round_trips_and_contains_no_request_url_or_credentials() {
+        let manifest = sample_manifest();
+        let encoded = serde_json::to_string(&manifest).unwrap();
+        let decoded: SegmentManifest = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, manifest);
+        assert!(!encoded.contains("https://"));
+        assert!(!encoded.to_ascii_lowercase().contains("authorization"));
+        assert!(!encoded.to_ascii_lowercase().contains("cookie"));
+        assert!(decoded.validate().is_ok());
+    }
+
+    #[test]
+    fn manifest_rejects_changed_or_noncanonical_segment_ranges() {
+        let mut manifest = sample_manifest();
+        manifest.segments[1].range = ByteRange { start: 24, end: 49 };
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn manifest_rejects_progress_beyond_segment_length() {
+        let mut manifest = sample_manifest();
+        manifest.segments[0].received_bytes = manifest.segments[0].range.len() + 1;
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn manifest_rejects_unsupported_schema_and_weak_etag() {
+        let mut manifest = sample_manifest();
+        manifest.schema_version += 1;
+        assert!(manifest.validate().is_err());
+
+        let mut manifest = sample_manifest();
+        manifest.validator = "W/\"weak\"".to_string();
+        assert!(manifest.validate().is_err());
     }
 }
