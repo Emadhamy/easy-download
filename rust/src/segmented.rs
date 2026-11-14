@@ -424,3 +424,75 @@ mod tests {
     }
 
 }
+
+
+// A persisted record contains only safe transfer metadata: never the URL,
+// cookies, authorization headers, or other request credentials.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SegmentState {
+    pub index: usize,
+    pub range: ByteRange,
+    pub received_bytes: u64,
+}
+
+/// Versioned sidecar data used to recover independently downloaded segments.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SegmentManifest {
+    pub schema_version: u32,
+    pub total_bytes: u64,
+    pub validator: String,
+    pub validator_is_etag: bool,
+    pub segments: Vec<SegmentState>,
+}
+
+impl SegmentManifest {
+    pub const SCHEMA_VERSION: u32 = 1;
+
+    /// Creates a fresh manifest from a verified range probe and range plan.
+    pub fn new(probe: &RangeProbe, segment_count: usize) -> Result<Self, String> {
+        let ranges = plan_ranges(probe.total_bytes, segment_count)?;
+        let manifest = Self {
+            schema_version: Self::SCHEMA_VERSION,
+            total_bytes: probe.total_bytes,
+            validator: probe.validator.clone(),
+            validator_is_etag: probe.validator_is_etag,
+            segments: ranges.into_iter().enumerate().map(|(index, range)| SegmentState {
+                index,
+                range,
+                received_bytes: 0,
+            }).collect(),
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    /// Rejects stale schemas, altered layouts, invalid validators, and
+    /// progress counters that exceed the exact byte range assigned to a part.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != Self::SCHEMA_VERSION {
+            return Err("Unsupported segmented-download manifest version".to_string());
+        }
+        if self.validator.trim().is_empty() {
+            return Err("Segmented-download manifest has no remote validator".to_string());
+        }
+        if self.validator_is_etag && self.validator.trim_start().starts_with("W/") {
+            return Err("Weak ETag is not valid for segmented-download recovery".to_string());
+        }
+        if self.segments.is_empty() || self.segments.len() > MAX_SEGMENTS_PER_FILE {
+            return Err("Segmented-download manifest has an invalid segment count".to_string());
+        }
+        let expected = plan_ranges(self.total_bytes, self.segments.len())?;
+        if self.segments.len() != expected.len() {
+            return Err("Segmented-download manifest layout is incomplete".to_string());
+        }
+        for (index, (segment, expected_range)) in self.segments.iter().zip(expected.iter()).enumerate() {
+            if segment.index != index || segment.range != *expected_range {
+                return Err("Segmented-download manifest ranges are not canonical".to_string());
+            }
+            if segment.received_bytes > segment.range.len() {
+                return Err("Segment progress exceeds its assigned byte range".to_string());
+            }
+        }
+        Ok(())
+    }
+}
