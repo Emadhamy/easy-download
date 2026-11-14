@@ -29,7 +29,7 @@ def audit_elf(path: Path, readelf: str, archive_path: str) -> tuple[list[str], b
     # youtubedl-android intentionally packages Python ZIP data with a .so suffix.
     # It is not a loadable ELF and must not be passed to llvm-readelf.
     with path.open("rb") as source:
-        if source.read(4) != b"\\x7fELF":
+        if source.read(4) != b"\x7fELF":
             return [], False
     result = run([readelf, "-lW", str(path)])
     if result.returncode:
