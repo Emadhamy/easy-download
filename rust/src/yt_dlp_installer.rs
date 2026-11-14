@@ -621,4 +621,40 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+
+    #[test]
+    fn rollback_rejects_invalid_previous_metadata_without_changing_active_pointer() {
+        use super::{rollback, write_json_atomically, ActiveYtDlp};
+
+        let root = temp_path("rollback-invalid-previous");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let current = ActiveYtDlp {
+            version: "2026.10.27".to_string(),
+            asset_name: "yt-dlp_linux".to_string(),
+            executable_path: "versions/2026.10.27/yt-dlp_linux".to_string(),
+            sha256: "a".repeat(64),
+        };
+        let invalid_previous = ActiveYtDlp {
+            version: "2026.10.26".to_string(),
+            asset_name: "yt-dlp_linux".to_string(),
+            executable_path: "versions/2026.10.26/yt-dlp_linux".to_string(),
+            sha256: "not-a-valid-sha256".to_string(),
+        };
+
+        write_json_atomically(&root.join("active.json"), &current).unwrap();
+        write_json_atomically(&root.join("previous.json"), &invalid_previous).unwrap();
+        let active_before = std::fs::read(root.join("active.json")).unwrap();
+
+        let result = rollback(&root, "linux-x86_64");
+
+        assert!(result.unwrap_err().contains("invalid SHA-256"));
+        assert_eq!(
+            std::fs::read(root.join("active.json")).unwrap(),
+            active_before,
+            "a rejected rollback must leave the active pointer unchanged"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
 }
