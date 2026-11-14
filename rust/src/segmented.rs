@@ -547,3 +547,99 @@ mod manifest_tests {
         assert!(manifest.validate().is_err());
     }
 }
+
+
+// Downloads one complete, independently validated segment into a staging file.
+// The caller may run several of these workers concurrently; each worker owns
+// exactly one range and one part path.
+pub fn download_segment_to_part(
+    input_url: &str,
+    manifest: &SegmentManifest,
+    segment_index: usize,
+    part_path: impl AsRef<std::path::Path>,
+    control: crate::DownloadControl,
+) -> Result<u64, String> {
+    use reqwest::header::{CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED};
+    use reqwest::StatusCode;
+    use std::fs::{self, OpenOptions};
+    use std::io::{Read, Write};
+
+    manifest.validate()?;
+    let segment = manifest.segments.get(segment_index)
+        .ok_or_else(|| "Segment index is outside the manifest".to_string())?;
+    let url = DownloadUrl::parse(input_url)?;
+    let part_path = part_path.as_ref();
+    let mut temporary_name = part_path.as_os_str().to_os_string();
+    temporary_name.push(".easy-download.tmp");
+    let temporary_path = std::path::PathBuf::from(temporary_name);
+
+    let result = (|| {
+        let client_builder = Client::builder();
+        #[cfg(test)]
+        let client_builder = client_builder.no_proxy();
+        let client = client_builder.build()
+            .map_err(|error| format!("Could not create HTTP client: {error}"))?;
+        let mut request = client.get(url.as_str())
+            .header(RANGE, segment.range.to_header_value())
+            .header(ACCEPT_ENCODING, "identity")
+            .header(IF_RANGE, manifest.validator.as_str());
+        let mut response = request.send()
+            .map_err(|error| format!("Segment request failed: {error}"))?;
+        if response.status() != StatusCode::PARTIAL_CONTENT {
+            return Err(format!("Segment request expected HTTP 206, received {}", response.status()));
+        }
+
+        let content_range = response.headers().get(CONTENT_RANGE)
+            .ok_or_else(|| "Segment response omitted Content-Range".to_string())?
+            .to_str().map_err(|_| "Invalid segment Content-Range".to_string())?;
+        ContentRange::parse(content_range)?.validate(segment.range, manifest.total_bytes)?;
+
+        let response_validator = if manifest.validator_is_etag {
+            response.headers().get(ETAG)
+        } else {
+            response.headers().get(LAST_MODIFIED)
+        }.ok_or_else(|| "Segment response omitted its remote validator".to_string())?
+            .to_str().map_err(|_| "Invalid segment validator header".to_string())?;
+        if response_validator != manifest.validator {
+            return Err("Remote representation changed while downloading segments".to_string());
+        }
+        if response.content_length().is_some_and(|length| length != segment.range.len()) {
+            return Err("Segment Content-Length does not match its assigned range".to_string());
+        }
+
+        let mut output = OpenOptions::new().write(true).create_new(true)
+            .open(&temporary_path)
+            .map_err(|error| format!("Could not create segment staging file: {error}"))?;
+        let mut received = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            control.wait_until_running()?;
+            let count = response.read(&mut buffer)
+                .map_err(|error| format!("Could not read segment response: {error}"))?;
+            if count == 0 { break; }
+            control.wait_until_running()?;
+            let next = received.checked_add(count as u64)
+                .ok_or_else(|| "Segment byte counter overflowed".to_string())?;
+            if next > segment.range.len() {
+                return Err("Segment response exceeded its assigned byte range".to_string());
+            }
+            output.write_all(&buffer[..count])
+                .map_err(|error| format!("Could not write segment data: {error}"))?;
+            received = next;
+        }
+        if received != segment.range.len() {
+            return Err(format!("Incomplete segment: received {received} of {} bytes", segment.range.len()));
+        }
+        output.flush().and_then(|_| output.sync_all())
+            .map_err(|error| format!("Could not sync segment staging file: {error}"))?;
+        drop(output);
+        fs::rename(&temporary_path, part_path)
+            .map_err(|error| format!("Could not finalize segment part file: {error}"))?;
+        Ok(received)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
+}
