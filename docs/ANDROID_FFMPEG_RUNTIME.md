@@ -29,9 +29,10 @@ References:
 Evaluate a reproducible Android NDK build of FFmpeg as a standalone app-private executable, rather than coupling FFmpeg to the yt-dlp Android AAR.
 
 Initial build target:
-- `arm64-v8a` / Rust target `aarch64-linux-android`
-- Keep other Android ABIs explicitly unsupported until their own artifacts and tests exist.
-- Use Android API 24 as the minimum platform to match the app's current minimum SDK.
+- Android runtime minimum: API 34 (Android 14). The application itself keeps its existing `minSdk 24`; Android 14 is a feature-availability gate for FFmpeg only.
+- `arm64-v8a` / Rust target `aarch64-linux-android` initially. Keep other Android ABIs explicitly unsupported until their own artifacts and tests exist.
+- Build the FFmpeg runtime against Android API 34 or newer, independently of the app's API 24 minimum.
+- Pin Android NDK r28 or newer for the FFmpeg toolchain. NDK r28 produces 16 KB-aligned shared libraries by default; still audit every ELF in the final app package, including Rust and third-party SDK libraries.
 
 The build must:
 1. Pin FFmpeg, LAME, NDK, build scripts, and all source archive digests to immutable versions.
