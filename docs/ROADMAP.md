@@ -66,7 +66,8 @@ This roadmap distinguishes code that is already present from work that still nee
 
 - [ ] Add BitTorrent support.
 - [ ] Add browser link handoff and browser integration.
-- [ ] On Android, receive shared URLs from other apps through the system Share sheet and present download/video format options.
+- [x] Receive shared HTTP(S) URLs from other apps through Android Share sheet, including cold-start and already-running app delivery.
+- [ ] Inspect shared video URLs on Android and present source-derived video/audio format and quality options.
 - [ ] Design and implement the floating video-capture indicator.
 - [ ] Add polished platform-specific UX and accessibility improvements.
 
