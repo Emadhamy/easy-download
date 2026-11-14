@@ -195,7 +195,9 @@ class MainActivity : FlutterActivity() {
                                 throw IllegalArgumentException("Only valid HTTP(S) video URLs are supported.")
                             }
                             val output = File(outputPath).canonicalFile
-                            val appRoot = filesDir.canonicalFile
+                            // Flutter's Android documents directory (app_flutter) is a sibling of files/.
+                            // Keep writes inside the app's private data directory while allowing that location.
+                            val appRoot = requireNotNull(applicationContext.filesDir.parentFile).canonicalFile
                             if (!output.path.startsWith(appRoot.path + File.separator)) {
                                 throw IllegalArgumentException("The output path must stay inside Easy Download's private storage.")
                             }
