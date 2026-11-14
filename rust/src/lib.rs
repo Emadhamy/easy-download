@@ -8,6 +8,7 @@ pub mod ffmpeg_updates;
 pub mod ffmpeg_installer;
 pub mod managed_tools;
 pub mod resumable;
+pub mod segmented;
 pub mod yt_dlp;
 pub mod yt_dlp_formats;
 pub mod yt_dlp_updates;
