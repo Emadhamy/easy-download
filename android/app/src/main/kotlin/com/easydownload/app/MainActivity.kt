@@ -39,9 +39,8 @@ class MainActivity : FlutterActivity() {
         if (intent == null || intent.action != Intent.ACTION_SEND) return
         val shared = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
         if (shared.isNullOrEmpty()) return
-        val channel = shareMethodChannel
-        if (channel == null) pendingSharedContent = shared
-        else channel.invokeMethod("sharedContentReceived", shared)
+        pendingSharedContent = shared
+        shareMethodChannel?.invokeMethod("sharedContentReceived", shared)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -52,6 +51,10 @@ class MainActivity : FlutterActivity() {
                     "getInitialSharedContent" -> {
                         result.success(pendingSharedContent)
                         pendingSharedContent = null
+                    }
+                    "acknowledgeSharedContent" -> {
+                        pendingSharedContent = null
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }
