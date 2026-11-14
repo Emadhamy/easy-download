@@ -170,6 +170,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   String? _downloadDirectoryPath;
   String? _androidDownloadTreeUri;
   static const int _maxConcurrentDownloads = 3;
+  static const _segmentCountKey = 'easy_download_segment_count_v1';
+  int _segmentCount = 4;
   static const _ytDlpAutoCheckKey = 'easy_download_yt_dlp_auto_check_v1';
   static const _ytDlpLastCheckKey = 'easy_download_yt_dlp_last_check_v1';
   static const _ytDlpHistoryKey = 'easy_download_yt_dlp_history_v1';
@@ -1341,6 +1343,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     setState(() {
       _downloadDirectoryPath = prefs.getString(_downloadDirectoryKey);
       _androidDownloadTreeUri = prefs.getString(_androidDirectoryKey);
+      final savedSegmentCount = prefs.getInt(_segmentCountKey) ?? 4;
+      _segmentCount = savedSegmentCount >= 4 && savedSegmentCount <= 8
+          ? savedSegmentCount
+          : 4;
     });
 
     try {
@@ -3063,27 +3069,70 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   Future<void> _showSettings() async {
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Download settings'),
-        content: Text(Platform.isAndroid
-            ? (_androidDownloadTreeUri == null
-                ? 'Downloads are saved in Easy Download app storage. Choose a folder to save completed downloads there. Downloads are staged privately while in progress, then copied to your chosen folder.'
-                : 'A folder has been selected for completed downloads. In-progress files remain in private app storage so pause and resume continue to work.')
-            : 'Download folder:\n${_downloadDirectoryPath ?? 'App documents folder (default)'}'),
-        actions: [
-          TextButton.icon(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              _chooseDownloadDirectory();
-            },
-            icon: const Icon(Icons.folder_open_rounded),
-            label: const Text('Choose folder'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, updateDialog) => AlertDialog(
+          title: const Text('Download settings'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(Platform.isAndroid
+                    ? (_androidDownloadTreeUri == null
+                        ? 'Downloads are saved in Easy Download app storage. Choose a folder to save completed downloads there. Downloads are staged privately while in progress, then copied to your chosen folder.'
+                        : 'A folder has been selected for completed downloads. In-progress files remain in private app storage so pause and resume continue to work.')
+                    : 'Download folder:\n${_downloadDirectoryPath ?? 'App documents folder (default)'}'),
+                const SizedBox(height: 20),
+                const Text(
+                  'Parallel download segments',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Default is 4. Choose up to 8 segments for eligible direct HTTP downloads. This setting applies to new downloads.',
+                  style: TextStyle(fontSize: 12, color: muted, height: 1.4),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<int>(
+                  value: _segmentCount,
+                  decoration: const InputDecoration(
+                    labelText: 'Segments per file',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: List.generate(
+                    5,
+                    (index) => DropdownMenuItem<int>(
+                      value: index + 4,
+                      child: Text('${index + 4} segments'),
+                    ),
+                  ),
+                  onChanged: (value) async {
+                    if (value == null || value < 4 || value > 8) return;
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setInt(_segmentCountKey, value);
+                    if (!mounted) return;
+                    setState(() => _segmentCount = value);
+                    updateDialog(() {});
+                  },
+                ),
+              ],
+            ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Close'),
-          ),
-        ],
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _chooseDownloadDirectory();
+              },
+              icon: const Icon(Icons.folder_open_rounded),
+              label: const Text('Choose folder'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
       ),
     );
   }
