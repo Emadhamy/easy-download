@@ -1997,9 +1997,11 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
     String? errorText;
     bool inspecting = false;
     List<Map<String, dynamic>> formats = [];
+    List<Map<String, dynamic>> audioFormats = [];
     Map<String, dynamic>? sourceInfo;
     String? inspectedSourceUrl;
     String? selectedFormatId;
+    String? selectedAudioFormatId;
 
     final selection = await showDialog<_VideoFormatSelection>(
       context: context,
@@ -2011,8 +2013,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               inspecting = true;
               errorText = null;
               formats = [];
+              audioFormats = [];
               sourceInfo = null;
               selectedFormatId = null;
+              selectedAudioFormatId = null;
             });
             try {
               final normalized = await rust_api.validateDownloadUrl(input: controller.text.trim());
@@ -2030,22 +2034,24 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 );
               }
               final decoded = jsonDecode(raw) as Map<String, dynamic>;
-              final available = (decoded['formats'] as List<dynamic>? ?? [])
+              final reported = (decoded['formats'] as List<dynamic>? ?? [])
                   .whereType<Map<String, dynamic>>()
-                  .where((format) =>
-                      format['hasVideo'] == true && format['hasAudio'] == true)
                   .toList();
-              if (available.isEmpty) {
-                throw StateError(
-                  'No combined video + audio format is available. This source needs separate streams, which will be supported after FFmpeg integration.',
-                );
+              final available = reported.where((format) =>
+                  format['hasVideo'] == true && format['hasAudio'] == true).toList();
+              final availableAudio = reported.where((format) =>
+                  format['hasVideo'] != true && format['hasAudio'] == true).toList();
+              if (available.isEmpty && availableAudio.isEmpty) {
+                throw StateError('This source did not report a directly downloadable video or audio format.');
               }
               if (!dialogContext.mounted) return;
               setDialogState(() {
                 sourceInfo = decoded;
                 inspectedSourceUrl = normalized;
                 formats = available;
-                selectedFormatId = available.first['formatId'] as String?;
+                audioFormats = availableAudio;
+                selectedFormatId = available.isEmpty ? null : available.first['formatId'] as String?;
+                selectedAudioFormatId = availableAudio.isEmpty ? null : availableAudio.first['formatId'] as String?;
               });
             } catch (error) {
               if (dialogContext.mounted) {
@@ -2063,6 +2069,16 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             final size = (format['filesize'] ?? format['filesizeApprox']) as num?;
             final details = <String>[resolution, extension.toUpperCase()];
             if (fps != null) details.add('${fps.toStringAsFixed(0)} FPS');
+            if (size != null) details.add(_formatYtDlpBytes(size.toInt()));
+            return details.join(' • ');
+          }
+
+          String audioFormatLabel(Map<String, dynamic> format) {
+            final extension = (format['ext'] as String? ?? 'audio').toUpperCase();
+            final bitrate = format['audioBitrate'] as num?;
+            final size = (format['filesize'] ?? format['filesizeApprox']) as num?;
+            final details = <String>['Original audio', extension];
+            if (bitrate != null) details.add('${bitrate.round()} kbps');
             if (size != null) details.add(_formatYtDlpBytes(size.toInt()));
             return details.join(' • ');
           }
@@ -2091,7 +2107,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                             sourceInfo = null;
                             inspectedSourceUrl = null;
                             formats = [];
+                            audioFormats = [];
                             selectedFormatId = null;
+                            selectedAudioFormatId = null;
                           });
                         }
                       },
@@ -2114,22 +2132,40 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                       Text(sourceInfo!['title'] as String? ?? 'Video',
                           style: const TextStyle(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        value: selectedFormatId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Video quality and format',
-                          border: OutlineInputBorder(),
+                      if (formats.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: selectedFormatId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Video quality (video + audio)',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: formats.map((format) => DropdownMenuItem<String>(
+                            value: format['formatId'] as String,
+                            child: Text(formatLabel(format), overflow: TextOverflow.ellipsis),
+                          )).toList(),
+                          onChanged: (value) => setDialogState(() => selectedFormatId = value),
                         ),
-                        items: formats.map((format) => DropdownMenuItem<String>(
-                          value: format['formatId'] as String,
-                          child: Text(formatLabel(format), overflow: TextOverflow.ellipsis),
-                        )).toList(),
-                        onChanged: (value) => setDialogState(() => selectedFormatId = value),
-                      ),
-                      const SizedBox(height: 8),
+                        const SizedBox(height: 10),
+                      ],
+                      if (audioFormats.isNotEmpty) ...[
+                        DropdownButtonFormField<String>(
+                          value: selectedAudioFormatId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Audio only (original source format)',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: audioFormats.map((format) => DropdownMenuItem<String>(
+                            value: format['formatId'] as String,
+                            child: Text(audioFormatLabel(format), overflow: TextOverflow.ellipsis),
+                          )).toList(),
+                          onChanged: (value) => setDialogState(() => selectedAudioFormatId = value),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       const Text(
-                        'These are source-reported formats containing both video and audio. Separate high-resolution streams and MP3 conversion are the next integration step.',
+                        'Audio-only downloads keep the format supplied by the source. They are not MP3 conversions. Separate video-stream merging and MP3 conversion require the verified FFmpeg runtime.',
                         style: TextStyle(fontSize: 11, color: Color(0xFF9A9AAF)),
                       ),
                     ],
@@ -2142,26 +2178,48 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text('Cancel'),
               ),
-              FilledButton.icon(
-                onPressed: sourceInfo != null && selectedFormatId != null && !inspecting
-                    ? () {
-                        final selected = formats.firstWhere(
-                          (format) => format['formatId'] == selectedFormatId,
-                        );
-                        final extension = (selected['ext'] as String? ?? 'mp4')
-                            .toLowerCase()
-                            .replaceAll(RegExp(r'[^a-z0-9]'), '');
-                        Navigator.of(dialogContext).pop(_VideoFormatSelection(
-                          sourceUrl: Uri.parse(inspectedSourceUrl!),
-                          title: sourceInfo!['title'] as String? ?? 'video',
-                          formatId: selectedFormatId!,
-                          extension: extension.isEmpty ? 'mp4' : extension,
-                        ));
-                      }
-                    : null,
-                icon: const Icon(Icons.playlist_add_rounded),
-                label: const Text('Add to download queue'),
-              ),
+              if (formats.isNotEmpty)
+                FilledButton.icon(
+                  onPressed: sourceInfo != null && selectedFormatId != null && !inspecting
+                      ? () {
+                          final selected = formats.firstWhere(
+                            (format) => format['formatId'] == selectedFormatId,
+                          );
+                          final extension = (selected['ext'] as String? ?? 'mp4')
+                              .toLowerCase()
+                              .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                          Navigator.of(dialogContext).pop(_VideoFormatSelection(
+                            sourceUrl: Uri.parse(inspectedSourceUrl!),
+                            title: sourceInfo!['title'] as String? ?? 'video',
+                            formatId: selectedFormatId!,
+                            extension: extension.isEmpty ? 'mp4' : extension,
+                          ));
+                        }
+                      : null,
+                  icon: const Icon(Icons.playlist_add_rounded),
+                  label: const Text('Add video'),
+                ),
+              if (audioFormats.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: sourceInfo != null && selectedAudioFormatId != null && !inspecting
+                      ? () {
+                          final selected = audioFormats.firstWhere(
+                            (format) => format['formatId'] == selectedAudioFormatId,
+                          );
+                          final extension = (selected['ext'] as String? ?? 'm4a')
+                              .toLowerCase()
+                              .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                          Navigator.of(dialogContext).pop(_VideoFormatSelection(
+                            sourceUrl: Uri.parse(inspectedSourceUrl!),
+                            title: sourceInfo!['title'] as String? ?? 'audio',
+                            formatId: selectedAudioFormatId!,
+                            extension: extension.isEmpty ? 'm4a' : extension,
+                          ));
+                        }
+                      : null,
+                  icon: const Icon(Icons.audio_file_outlined),
+                  label: const Text('Add original audio'),
+                ),
             ],
           );
         },
