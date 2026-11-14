@@ -312,7 +312,8 @@ class MainActivity : FlutterActivity() {
                             val payload = connection.inputStream.bufferedReader().use { it.readText() }
                             val latest = JSONObject(payload).optString("tag_name")
                             if (latest.isBlank()) throw IllegalStateException("The official release did not include a version tag.")
-                            val installed = YoutubeDL.getInstance().version(applicationContext)
+                            val installed = YoutubeDL.getInstance().versionName(applicationContext)
+                                ?: YoutubeDL.getInstance().version(applicationContext)
                             runOnUiThread {
                                 result.success(mapOf("latestVersion" to latest, "installedVersion" to installed))
                             }
