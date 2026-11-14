@@ -60,7 +60,8 @@ pub fn plan_ranges(total_bytes: u64, segment_count: usize) -> Result<Vec<ByteRan
     let mut next_start = 0_u64;
 
     for index in 0..count {
-        let length = base_length + u64::from(index < remainder);
+        let extra_byte = if index < remainder { 1_u64 } else { 0_u64 };
+        let length = base_length + extra_byte;
         let end = next_start
             .checked_add(length - 1)
             .ok_or_else(|| "Byte-range arithmetic overflowed".to_string())?;
