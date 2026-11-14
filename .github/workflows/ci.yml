@@ -86,9 +86,9 @@ jobs:
           fi
           echo "Using SDK manager: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses || true
-          "$SDKMANAGER" --install "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          "$SDKMANAGER" --install "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
