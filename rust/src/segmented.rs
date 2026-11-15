@@ -1079,6 +1079,245 @@ where
 }
 
 
+
+/// Crash-resumable segmented transfer. The sidecar is saved before workers
+/// start and after every completed segment. Only matching, exact-length parts
+/// are reused after a later process restart.
+pub fn download_segmented_to_path_recoverable<F>(
+    input_url: &str,
+    request_headers_json: &str,
+    probe: &RangeProbe,
+    destination: impl AsRef<std::path::Path>,
+    segment_count: usize,
+    control: crate::DownloadControl,
+    mut on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(usize, usize, u64, u64),
+{
+    use std::fs::{self, File, OpenOptions};
+    use std::io::{Read, Write};
+    use std::sync::mpsc;
+
+    let destination = destination.as_ref();
+    if destination.exists() {
+        return Err("Destination already exists; refusing to overwrite an existing file".to_string());
+    }
+    let parent = destination.parent().filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    if !parent.is_dir() {
+        return Err("Destination directory does not exist".to_string());
+    }
+
+    let (mut recovery, mut completed_segments) =
+        crate::segmented_recovery::prepare_recovery(
+            input_url, request_headers_json, destination, probe, segment_count,
+        )?;
+    let manifest = recovery.transfer.clone();
+    manifest.validate()?;
+
+    let part_paths = (0..segment_count)
+        .map(|index| crate::segmented_recovery::segment_part_path(destination, index))
+        .collect::<Vec<_>>();
+    let mut assembly_name = destination.as_os_str().to_os_string();
+    assembly_name.push(".easy-download.assembling");
+    let assembly_path = std::path::PathBuf::from(assembly_name);
+
+    let mut segment_progress = recovery.transfer.segments.iter()
+        .map(|segment| segment.received_bytes)
+        .collect::<Vec<_>>();
+    on_progress(
+        completed_segments,
+        segment_count,
+        segment_progress.iter().copied().sum(),
+        manifest.total_bytes,
+    );
+
+    enum WorkerMessage {
+        Progress(usize, u64),
+        Finished(usize, Result<u64, String>),
+    }
+    let pending_indices = (0..segment_count)
+        .filter(|index| recovery.transfer.segments[*index].received_bytes == 0)
+        .collect::<Vec<_>>();
+    let (sender, receiver) = mpsc::channel::<WorkerMessage>();
+    let shared_control = control.clone();
+    let mut first_error: Option<String> = None;
+
+    if !pending_indices.is_empty() {
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(pending_indices.len());
+            for index in pending_indices.iter().copied() {
+                let sender = sender.clone();
+                let worker_url = input_url.to_string();
+                let worker_manifest = manifest.clone();
+                let worker_path = part_paths[index].clone();
+                let worker_control = shared_control.clone();
+                handles.push(scope.spawn(move || {
+                    let mut last_error = None;
+                    for attempt in 1..=SEGMENT_ATTEMPTS {
+                        if worker_control.wait_until_running().is_err() {
+                            last_error = Some("Download cancelled".to_string());
+                            break;
+                        }
+                        let _ = sender.send(WorkerMessage::Progress(index, 0));
+                        match download_segment_to_part_with_progress(
+                            &worker_url, &worker_manifest, index, &worker_path,
+                            worker_control.clone(),
+                            |received| { let _ = sender.send(WorkerMessage::Progress(index, received)); },
+                        ) {
+                            Ok(bytes) => {
+                                let _ = sender.send(WorkerMessage::Finished(index, Ok(bytes)));
+                                return;
+                            }
+                            Err(error) => {
+                                last_error = Some(error);
+                                if attempt < SEGMENT_ATTEMPTS {
+                                    let _ = fs::remove_file(&worker_path);
+                                }
+                            }
+                        }
+                    }
+                    let _ = sender.send(WorkerMessage::Finished(
+                        index,
+                        Err(last_error.unwrap_or_else(|| "Segment failed without an error detail".to_string())),
+                    ));
+                }));
+            }
+            drop(sender);
+
+            let mut finished_workers = 0_usize;
+            while finished_workers < pending_indices.len() {
+                match receiver.recv() {
+                    Ok(WorkerMessage::Progress(index, received)) => {
+                        if let Some(progress) = segment_progress.get_mut(index) { *progress = received; }
+                        on_progress(
+                            completed_segments, segment_count,
+                            segment_progress.iter().copied().sum(), manifest.total_bytes,
+                        );
+                    }
+                    Ok(WorkerMessage::Finished(index, Ok(bytes))) => {
+                        finished_workers += 1;
+                        if let Some(progress) = segment_progress.get_mut(index) { *progress = bytes; }
+                        recovery.transfer.segments[index].received_bytes = bytes;
+                        match crate::segmented_recovery::save_atomic(
+                            &crate::segmented_recovery::sidecar_path(destination), &recovery,
+                        ) {
+                            Ok(()) => completed_segments += 1,
+                            Err(error) => {
+                                if first_error.is_none() { first_error = Some(error); }
+                                shared_control.cancel();
+                            }
+                        }
+                        on_progress(
+                            completed_segments, segment_count,
+                            segment_progress.iter().copied().sum(), manifest.total_bytes,
+                        );
+                    }
+                    Ok(WorkerMessage::Finished(_index, Err(error))) => {
+                        finished_workers += 1;
+                        if first_error.is_none() { first_error = Some(error); }
+                        shared_control.cancel();
+                    }
+                    Err(_) => {
+                        if first_error.is_none() {
+                            first_error = Some("A recovery segment worker stopped unexpectedly".to_string());
+                        }
+                        shared_control.cancel();
+                        break;
+                    }
+                }
+            }
+            for handle in handles {
+                if handle.join().is_err() && first_error.is_none() {
+                    first_error = Some("A recovery segment worker panicked".to_string());
+                    shared_control.cancel();
+                }
+            }
+        });
+    }
+
+    // Interrupted workers may leave private temporary files; these are never
+    // treated as complete and are discarded before the next attempt.
+    for path in &part_paths {
+        let mut temporary_name = path.as_os_str().to_os_string();
+        temporary_name.push(".easy-download.tmp");
+        let _ = fs::remove_file(std::path::PathBuf::from(temporary_name));
+    }
+
+    if let Some(error) = first_error { return Err(error); }
+    if completed_segments != segment_count
+        || segment_progress.iter().copied().sum::<u64>() != manifest.total_bytes
+    {
+        return Err("Recovered segment byte count does not match the original file".to_string());
+    }
+
+    // Persist the complete set before assembly so an interrupted assembly can
+    // be retried without fetching any segment again.
+    for segment in &mut recovery.transfer.segments {
+        segment.received_bytes = segment.range.len();
+    }
+    crate::segmented_recovery::save_atomic(
+        &crate::segmented_recovery::sidecar_path(destination), &recovery,
+    )?;
+
+    let assembly_result = (|| {
+        let mut output = OpenOptions::new().write(true).create_new(true)
+            .open(&assembly_path)
+            .map_err(|error| format!("Could not create recovery assembly staging file: {error}"))?;
+        let mut assembled_bytes = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        for (index, part_path) in part_paths.iter().enumerate() {
+            control.wait_until_running()?;
+            let expected = manifest.segments[index].range.len();
+            let mut input = File::open(part_path)
+                .map_err(|error| format!("Could not open recovered segment {index}: {error}"))?;
+            let mut part_bytes = 0_u64;
+            loop {
+                let count = input.read(&mut buffer)
+                    .map_err(|error| format!("Could not read recovered segment {index}: {error}"))?;
+                if count == 0 { break; }
+                part_bytes = part_bytes.checked_add(count as u64)
+                    .ok_or_else(|| "Recovered assembly byte counter overflowed".to_string())?;
+                if part_bytes > expected {
+                    return Err(format!("Recovered segment {index} exceeds its expected length"));
+                }
+                output.write_all(&buffer[..count])
+                    .map_err(|error| format!("Could not assemble recovered segment {index}: {error}"))?;
+            }
+            if part_bytes != expected {
+                return Err(format!("Recovered segment {index} has {part_bytes} bytes; expected {expected}"));
+            }
+            assembled_bytes = assembled_bytes.checked_add(part_bytes)
+                .ok_or_else(|| "Recovered final assembly byte counter overflowed".to_string())?;
+        }
+        output.flush().and_then(|_| output.sync_all())
+            .map_err(|error| format!("Could not sync recovered assembled download: {error}"))?;
+        drop(output);
+        if assembled_bytes != manifest.total_bytes {
+            return Err(format!(
+                "Recovered assembled file has {assembled_bytes} bytes; expected {}",
+                manifest.total_bytes
+            ));
+        }
+        fs::rename(&assembly_path, destination)
+            .map_err(|error| format!("Could not finalize recovered download: {error}"))?;
+        Ok(assembled_bytes)
+    })();
+
+    match assembly_result {
+        Ok(bytes) => {
+            for path in &part_paths { let _ = fs::remove_file(path); }
+            let _ = fs::remove_file(crate::segmented_recovery::sidecar_path(destination));
+            Ok(bytes)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&assembly_path);
+            Err(error)
+        }
+    }
+}
+
 #[cfg(test)]
 mod orchestrator_tests {
     use super::{
