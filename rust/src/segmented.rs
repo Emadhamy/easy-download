@@ -1224,6 +1224,96 @@ mod orchestrator_tests {
     }
 
     #[test]
+    fn cancellation_during_active_segment_transfer_cleans_all_staging_files() {
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        let body = fixture();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_body = body.clone();
+        let server = thread::spawn(move || {
+            let mut handlers = Vec::new();
+            for _ in 0..DEFAULT_SEGMENT_COUNT {
+                let (mut stream, _) = listener.accept().unwrap();
+                let body = server_body.clone();
+                handlers.push(thread::spawn(move || {
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 2048];
+                    loop {
+                        let count = stream.read(&mut buffer).unwrap();
+                        if count == 0 { break; }
+                        request.extend_from_slice(&buffer[..count]);
+                        if request.windows(4).any(|window| window == b"\\r\\n\\r\\n") { break; }
+                    }
+                    let request = String::from_utf8_lossy(&request);
+                    let range_line = request.lines()
+                        .find(|line| line.to_ascii_lowercase().starts_with("range:"))
+                        .expect("worker must send Range header");
+                    let value = range_line.split_once('=').unwrap().1.trim();
+                    let (start, end) = value.split_once('-').unwrap();
+                    let start = start.parse::<usize>().unwrap();
+                    let end = end.parse::<usize>().unwrap();
+                    let chunk = &body[start..=end];
+                    let headers = format!(
+                        "HTTP/1.1 206 Partial Content\\r\\nContent-Length: {}\\r\\nContent-Range: bytes {}-{}/{}\\r\\nETag: \\"orchestrator-v1\\"\\r\\nConnection: close\\r\\n\\r\\n",
+                        chunk.len(), start, end, body.len()
+                    );
+                    if stream.write_all(headers.as_bytes()).is_err() { return; }
+                    for piece in chunk.chunks(1024) {
+                        if stream.write_all(piece).is_err() { break; }
+                        let _ = stream.flush();
+                        thread::sleep(Duration::from_millis(8));
+                    }
+                }));
+            }
+            for handler in handlers { handler.join().unwrap(); }
+        });
+
+        let probe = RangeProbe {
+            total_bytes: body.len() as u64,
+            validator: "\\"orchestrator-v1\\"".to_string(),
+            validator_is_etag: true,
+        };
+        let manifest = SegmentManifest::new(&probe, DEFAULT_SEGMENT_COUNT).unwrap();
+        let path = destination("cancel-active");
+        let control = DownloadControl::new();
+        let cancel_control = control.clone();
+        let mut observed_in_flight_progress = false;
+        let result = download_segmented_to_path(
+            &format!("http://{address}/fixture.bin"),
+            &manifest,
+            &path,
+            DEFAULT_SEGMENT_COUNT,
+            control,
+            |_, _, received, _| {
+                if received > 0 && !observed_in_flight_progress {
+                    observed_in_flight_progress = true;
+                    cancel_control.cancel();
+                }
+            },
+        );
+
+        server.join().unwrap();
+        assert!(observed_in_flight_progress, "cancellation must happen after bytes arrive");
+        assert!(result.unwrap_err().to_ascii_lowercase().contains("cancel"));
+        assert!(!path.exists(), "cancelled transfer must not publish a final file");
+        for index in 0..DEFAULT_SEGMENT_COUNT {
+            let mut part = path.as_os_str().to_os_string();
+            part.push(format!(".segment-{index}.part"));
+            let part = std::path::PathBuf::from(part);
+            assert!(!part.exists(), "segment part {index} must be removed");
+            let mut temporary = part.as_os_str().to_os_string();
+            temporary.push(".easy-download.tmp");
+            assert!(!std::path::PathBuf::from(temporary).exists(),
+                "segment staging file {index} must be removed");
+        }
+        let mut assembly = path.as_os_str().to_os_string();
+        assembly.push(".easy-download.assembling");
+        assert!(!std::path::PathBuf::from(assembly).exists());
+    }
+
+    #[test]
     fn rejects_segment_count_outside_user_settings() {
         let probe = RangeProbe {
             total_bytes: 64,
