@@ -149,6 +149,139 @@ pub fn download_file_resumable_controlled_with_headers(
     result
 }
 
+const SEGMENTED_MINIMUM_BYTES: u64 = 8 * 1024 * 1024;
+
+fn request_headers_are_empty(headers_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(headers_json)
+        .ok()
+        .and_then(|value| value.as_object().map(|object| object.is_empty()))
+        .unwrap_or(false)
+}
+
+fn has_existing_partial_download(destination: &std::path::Path, segment_count: usize) -> bool {
+    let mut partial = destination.as_os_str().to_os_string();
+    partial.push(".easy-download.part");
+    let mut metadata = destination.as_os_str().to_os_string();
+    metadata.push(".easy-download.meta.json");
+    let mut assembly = destination.as_os_str().to_os_string();
+    assembly.push(".easy-download.assembling");
+    if std::path::Path::new(&partial).exists()
+        || std::path::Path::new(&metadata).exists()
+        || std::path::Path::new(&assembly).exists()
+    {
+        return true;
+    }
+    (0..segment_count).any(|index| {
+        let mut part = destination.as_os_str().to_os_string();
+        part.push(format!(".segment-{index}.part"));
+        std::path::Path::new(&part).exists()
+    })
+}
+
+/// Uses parallel byte ranges for eligible large direct downloads, and safely
+/// falls back to the existing resumable single-connection path otherwise.
+/// Segmented transfers are intentionally not yet crash-resumable; any existing
+/// partial state therefore stays on the single-connection resume path.
+#[frb]
+pub fn download_file_resumable_controlled_with_headers_and_segments(
+    task_id: String,
+    input_url: String,
+    headers_json: String,
+    destination_path: String,
+    segment_count: usize,
+    sink: StreamSink<String>,
+) -> Result<u64, String> {
+    if !(crate::segmented::DEFAULT_SEGMENT_COUNT..=crate::segmented::USER_MAX_SEGMENT_COUNT)
+        .contains(&segment_count)
+    {
+        return Err(format!(
+            "Parallel segment count must be between {} and {}",
+            crate::segmented::DEFAULT_SEGMENT_COUNT,
+            crate::segmented::USER_MAX_SEGMENT_COUNT
+        ));
+    }
+
+    let control = DownloadControl::new();
+    {
+        let mut registry = controls().lock()
+            .map_err(|_| "Download control registry lock poisoned".to_string())?;
+        if registry.contains_key(&task_id) {
+            return Err("A download with this task ID is already registered".to_string());
+        }
+        registry.insert(task_id.clone(), control.clone());
+    }
+
+    let destination = std::path::PathBuf::from(destination_path);
+    let eligible = request_headers_are_empty(&headers_json)
+        && !has_existing_partial_download(&destination, segment_count);
+
+    let result = (|| {
+        if eligible {
+            if let Ok(probe) = crate::segmented::probe_range_support(&input_url) {
+                if probe.total_bytes >= SEGMENTED_MINIMUM_BYTES
+                    && probe.total_bytes >= segment_count as u64
+                {
+                    if let Ok(manifest) = crate::segmented::SegmentManifest::new(&probe, segment_count) {
+                        return crate::segmented::download_segmented_to_path(
+                            &input_url,
+                            &manifest,
+                            &destination,
+                            segment_count,
+                            control.clone(),
+                            |completed_segments, total_segments, received, total| {
+                                let event = serde_json::json!({
+                                    "taskId": task_id,
+                                    "received": received,
+                                    "total": total,
+                                    "segmentsCompleted": completed_segments,
+                                    "segmentsTotal": total_segments,
+                                    "mode": "segmented",
+                                });
+                                let _ = sink.add(event.to_string());
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        crate::resumable::download_to_path_resumable_with_control_and_headers(
+            &input_url,
+            &headers_json,
+            &destination,
+            control.clone(),
+            |received, total| {
+                let event = serde_json::json!({
+                    "taskId": task_id,
+                    "received": received,
+                    "total": total,
+                    "mode": "single",
+                });
+                let _ = sink.add(event.to_string());
+            },
+        )
+    })();
+
+    if let Ok(mut registry) = controls().lock() {
+        registry.remove(&task_id);
+    }
+    result
+}
+
+#[cfg(test)]
+mod segmented_api_tests {
+    use super::request_headers_are_empty;
+
+    #[test]
+    fn only_empty_json_header_objects_are_eligible_for_segmentation() {
+        assert!(request_headers_are_empty("{}"));
+        assert!(request_headers_are_empty(" { } "));
+        assert!(!request_headers_are_empty(r#"{"Authorization":"Bearer secret"}"#));
+        assert!(!request_headers_are_empty("[]"));
+        assert!(!request_headers_are_empty("not-json"));
+    }
+}
+
 /// Returns the canonical OS/CPU key for this application build.
 #[frb]
 pub fn get_current_platform_target() -> Result<String, String> {
