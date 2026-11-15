@@ -1159,7 +1159,10 @@ mod orchestrator_tests {
         server.join().unwrap();
         assert_eq!(received, body.len() as u64);
         assert_eq!(std::fs::read(&path).unwrap(), body);
-        assert_eq!(progress_events.len(), segment_count);
+        assert!(progress_events.len() >= segment_count);
+        assert!(progress_events.iter().any(|event| {
+            event.2 > 0 && event.2 < body.len() as u64
+        }), "progress should report bytes before the whole file completes");
         assert_eq!(progress_events.last().unwrap().0, segment_count);
         assert_eq!(progress_events.last().unwrap().1, segment_count);
         assert_eq!(progress_events.last().unwrap().2, body.len() as u64);
