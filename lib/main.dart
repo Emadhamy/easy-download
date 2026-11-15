@@ -1869,12 +1869,24 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
           }
         }
 
-        await for (final event in rust_api.downloadFileResumableControlledWithHeaders(
-          taskId: taskId,
-          inputUrl: transferUrl,
-          headersJson: transferHeadersJson,
-          destinationPath: destination,
-        )) {
+        // Keep yt-dlp format URLs on their dedicated single-transfer path.
+        // Parallel byte ranges are only enabled for direct downloads.
+        final progressEvents = link.ytDlpFormatId == null
+            ? rust_api.downloadFileResumableControlledWithHeadersAndSegments(
+                taskId: taskId,
+                inputUrl: transferUrl,
+                headersJson: transferHeadersJson,
+                destinationPath: destination,
+                segmentCount: BigInt.from(_segmentCount),
+              )
+            : rust_api.downloadFileResumableControlledWithHeaders(
+                taskId: taskId,
+                inputUrl: transferUrl,
+                headersJson: transferHeadersJson,
+                destinationPath: destination,
+              );
+
+        await for (final event in progressEvents) {
           final progress = jsonDecode(event) as Map<String, dynamic>;
           final received = (progress['received'] as num).toInt();
           final total = (progress['total'] as num?)?.toInt();
