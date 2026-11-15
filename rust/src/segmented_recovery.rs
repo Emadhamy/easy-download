@@ -382,7 +382,7 @@ mod tests {
         let destination = temp_destination("worker-temp");
         let probe = RangeProbe {
             total_bytes: 12,
-            validator: "\\"stable-v1\\"".to_string(),
+            validator: "\"stable-v1\"".to_string(),
             validator_is_etag: true,
         };
         prepare_recovery("https://example.com/file.bin", "{}", &destination, &probe, 4).unwrap();
