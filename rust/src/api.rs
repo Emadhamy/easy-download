@@ -159,31 +159,34 @@ fn request_headers_are_empty(headers_json: &str) -> bool {
 }
 
 fn has_existing_partial_download(destination: &std::path::Path) -> bool {
-    let mut partial = destination.as_os_str().to_os_string();
-    partial.push(".easy-download.part");
-    let mut metadata = destination.as_os_str().to_os_string();
-    metadata.push(".easy-download.meta.json");
-    let mut assembly = destination.as_os_str().to_os_string();
-    assembly.push(".easy-download.assembling");
-    if std::path::Path::new(&partial).exists()
-        || std::path::Path::new(&metadata).exists()
-        || std::path::Path::new(&assembly).exists()
-    {
-        return true;
+    has_existing_single_connection_partial(destination)
+        || has_existing_segmented_state(destination)
+        || {
+            let mut assembly = destination.as_os_str().to_os_string();
+            assembly.push(".easy-download.assembling");
+            std::path::Path::new(&assembly).exists()
+        }
+}
+
+fn has_existing_single_connection_partial(destination: &std::path::Path) -> bool {
+    for suffix in [".easy-download.part", ".easy-download.meta.json"] {
+        let mut name = destination.as_os_str().to_os_string();
+        name.push(suffix);
+        if std::path::Path::new(&name).exists() { return true; }
     }
-    // Check the full supported range, not only the newly selected count.
-    // A previous attempt may have used 8 segments while this retry selects 4.
+    false
+}
+
+fn has_existing_segmented_state(destination: &std::path::Path) -> bool {
+    if crate::segmented_recovery::sidecar_path(destination).exists() { return true; }
     (0..crate::segmented::USER_MAX_SEGMENT_COUNT).any(|index| {
-        let mut part = destination.as_os_str().to_os_string();
-        part.push(format!(".segment-{index}.part"));
-        std::path::Path::new(&part).exists()
+        crate::segmented_recovery::segment_part_path(destination, index).exists()
     })
 }
 
-/// Uses parallel byte ranges for eligible large direct downloads, and safely
-/// falls back to the existing resumable single-connection path otherwise.
-/// Segmented transfers are intentionally not yet crash-resumable; any existing
-/// partial state therefore stays on the single-connection resume path.
+/// Uses parallel byte ranges for eligible large direct downloads. Completed
+/// segments are retained across process restarts only when the request
+/// fingerprint and the current remote validator still match.
 #[frb]
 pub fn download_file_resumable_controlled_with_headers_and_segments(
     task_id: String,
@@ -214,37 +217,51 @@ pub fn download_file_resumable_controlled_with_headers_and_segments(
     }
 
     let destination = std::path::PathBuf::from(destination_path);
-    let eligible = request_headers_are_empty(&headers_json)
-        && !has_existing_partial_download(&destination);
+    let has_segmented_state = has_existing_segmented_state(&destination);
+    let headers_empty = request_headers_are_empty(&headers_json);
 
     let result = (|| {
-        if eligible {
-            if let Ok(probe) = crate::segmented::probe_range_support(&input_url) {
-                if probe.total_bytes >= SEGMENTED_MINIMUM_BYTES
-                    && probe.total_bytes >= segment_count as u64
+        if !headers_empty && has_segmented_state {
+            return Err("A segmented partial download exists but this request contains headers; refusing an unsafe single-stream fallback".to_string());
+        }
+
+        if headers_empty && !has_existing_single_connection_partial(&destination) {
+            match crate::segmented::probe_range_support(&input_url) {
+                Ok(probe) if probe.total_bytes >= SEGMENTED_MINIMUM_BYTES
+                    && probe.total_bytes >= segment_count as u64 =>
                 {
-                    if let Ok(manifest) = crate::segmented::SegmentManifest::new(&probe, segment_count) {
-                        return crate::segmented::download_segmented_to_path(
-                            &input_url,
-                            &manifest,
-                            &destination,
-                            segment_count,
-                            control.clone(),
-                            |completed_segments, total_segments, received, total| {
-                                let event = serde_json::json!({
-                                    "taskId": task_id,
-                                    "received": received,
-                                    "total": total,
-                                    "segmentsCompleted": completed_segments,
-                                    "segmentsTotal": total_segments,
-                                    "mode": "segmented",
-                                });
-                                let _ = sink.add(event.to_string());
-                            },
-                        );
-                    }
+                    return crate::segmented::download_segmented_to_path_recoverable(
+                        &input_url,
+                        &headers_json,
+                        &probe,
+                        &destination,
+                        segment_count,
+                        control.clone(),
+                        |completed_segments, total_segments, received, total| {
+                            let event = serde_json::json!({
+                                "taskId": task_id,
+                                "received": received,
+                                "total": total,
+                                "segmentsCompleted": completed_segments,
+                                "segmentsTotal": total_segments,
+                                "mode": "segmented",
+                            });
+                            let _ = sink.add(event.to_string());
+                        },
+                    );
                 }
+                Ok(_) if has_segmented_state => {
+                    return Err("The existing segmented partial is no longer eligible for parallel recovery; preserving its data instead of falling back unsafely".to_string());
+                }
+                Err(error) if has_segmented_state => {
+                    return Err(format!("Could not verify the existing segmented partial against the server: {error}"));
+                }
+                _ => {}
             }
+        }
+
+        if has_segmented_state {
+            return Err("An existing segmented partial could not be resumed safely; its files were preserved".to_string());
         }
 
         crate::resumable::download_to_path_resumable_with_control_and_headers(
