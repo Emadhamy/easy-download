@@ -1244,7 +1244,7 @@ mod orchestrator_tests {
                         let count = stream.read(&mut buffer).unwrap();
                         if count == 0 { break; }
                         request.extend_from_slice(&buffer[..count]);
-                        if request.windows(4).any(|window| window == b"\\r\\n\\r\\n") { break; }
+                        if request.windows(4).any(|window| window == b"\r\n\r\n") { break; }
                     }
                     let request = String::from_utf8_lossy(&request);
                     let range_line = request.lines()
@@ -1256,7 +1256,7 @@ mod orchestrator_tests {
                     let end = end.parse::<usize>().unwrap();
                     let chunk = &body[start..=end];
                     let headers = format!(
-                        "HTTP/1.1 206 Partial Content\\r\\nContent-Length: {}\\r\\nContent-Range: bytes {}-{}/{}\\r\\nETag: \\"orchestrator-v1\\"\\r\\nConnection: close\\r\\n\\r\\n",
+                        "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nETag: \"orchestrator-v1\"\r\nConnection: close\r\n\r\n",
                         chunk.len(), start, end, body.len()
                     );
                     if stream.write_all(headers.as_bytes()).is_err() { return; }
@@ -1272,7 +1272,7 @@ mod orchestrator_tests {
 
         let probe = RangeProbe {
             total_bytes: body.len() as u64,
-            validator: "\\"orchestrator-v1\\"".to_string(),
+            validator: "\"orchestrator-v1\"".to_string(),
             validator_is_etag: true,
         };
         let manifest = SegmentManifest::new(&probe, DEFAULT_SEGMENT_COUNT).unwrap();
