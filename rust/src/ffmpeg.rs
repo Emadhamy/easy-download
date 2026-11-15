@@ -148,7 +148,7 @@ where F: FnMut(u64, Option<u64>) {
 
     let probe = Command::new(executable).args(["-hide_banner", "-i"]).arg(&input).output()
         .map_err(|error| format!("Could not probe input video: {error}"))?;
-    let probe_text = format!("{}\\n{}", String::from_utf8_lossy(&probe.stdout), String::from_utf8_lossy(&probe.stderr));
+    let probe_text = format!("{}\n{}", String::from_utf8_lossy(&probe.stdout), String::from_utf8_lossy(&probe.stderr));
     let duration = parse_duration_millis(&probe_text);
 
     let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -228,13 +228,85 @@ where F: FnMut(u64, Option<u64>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_duration_millis, validate_bitrate, validate_output};
-    use std::path::Path;
+    use super::{
+        convert_to_mp3, parse_duration_millis, validate_bitrate, validate_output,
+    };
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let id = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "easy-download-ffmpeg-test-{}-{id}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    fn fake_ffmpeg(directory: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let executable = directory.join("ffmpeg-test");
+        let script = r#"#!/bin/sh
+is_conversion=0
+should_fail=0
+for arg in "$@"; do
+  case "$arg" in
+    -version)
+      echo "ffmpeg version test-build"
+      exit 0
+      ;;
+    -codec:a)
+      is_conversion=1
+      ;;
+    *fail-input*)
+      should_fail=1
+      ;;
+  esac
+done
+if [ "$is_conversion" -eq 0 ]; then
+  echo "Duration: 00:00:02.000, start: 0" >&2
+  exit 0
+fi
+if [ "$should_fail" -eq 1 ]; then
+  echo "synthetic conversion failure" >&2
+  exit 7
+fi
+last=""
+for arg in "$@"; do last="$arg"; done
+printf 'out_time_us=500000\nprogress=continue\n'
+printf 'ID3synthetic-mp3' > "$last"
+exit 0
+"#;
+        std::fs::write(&executable, script).unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        executable
+    }
 
     #[test]
     fn parses_ffmpeg_duration() {
         assert_eq!(
-            parse_duration_millis("Input #0, mp4, from 'x':\n  Duration: 00:01:02.500, start: 0"),
+            parse_duration_millis("Input #0, mp4, from 'x':\\n  Duration: 00:01:02.500, start: 0"),
             Some(62_500)
         );
         assert_eq!(parse_duration_millis("Duration: N/A"), None);
@@ -253,5 +325,49 @@ mod tests {
     fn refuses_existing_output_and_non_mp3_extension() {
         let input = std::env::current_dir().unwrap().join("input.mp4");
         assert!(validate_output(Path::new("/tmp/not-audio.wav"), &input).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn converts_with_verified_progress_and_atomically_creates_mp3() {
+        let directory = TestDirectory::new();
+        let executable = fake_ffmpeg(directory.path());
+        let input = directory.path().join("source.mp4");
+        let output = directory.path().join("converted.mp3");
+        std::fs::write(&input, b"synthetic video fixture").unwrap();
+        let mut progress = Vec::new();
+
+        let result = convert_to_mp3(&executable, &input, &output, "192k", |elapsed, total| {
+            progress.push((elapsed, total));
+        }).unwrap();
+
+        assert_eq!(PathBuf::from(result), output);
+        assert_eq!(std::fs::read(&output).unwrap(), b"ID3synthetic-mp3");
+        assert_eq!(progress, vec![(500, Some(2_000))]);
+        let leftovers: Vec<_> = std::fs::read_dir(directory.path()).unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".part-"))
+            .collect();
+        assert!(leftovers.is_empty(), "staged MP3 files must not remain after success");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_conversion_removes_staged_mp3_and_preserves_no_final_output() {
+        let directory = TestDirectory::new();
+        let executable = fake_ffmpeg(directory.path());
+        let input = directory.path().join("fail-input.mp4");
+        let output = directory.path().join("failed.mp3");
+        std::fs::write(&input, b"synthetic invalid video fixture").unwrap();
+
+        let error = convert_to_mp3(&executable, &input, &output, "128k", |_, _| {}).unwrap_err();
+
+        assert!(error.contains("synthetic conversion failure"));
+        assert!(!output.exists());
+        let leftovers: Vec<_> = std::fs::read_dir(directory.path()).unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".part-"))
+            .collect();
+        assert!(leftovers.is_empty(), "failed conversions must clean staged MP3 files");
     }
 }
