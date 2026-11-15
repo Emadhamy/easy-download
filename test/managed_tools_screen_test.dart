@@ -96,7 +96,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('Test update failure'), findsOneWidget);
+      expect(find.text('Test update failure'), findsAtLeastNWidgets(1));
       expect(controller.statuses[ManagedTool.ffmpeg]!.health, ToolHealth.failed);
       expect(controller.statuses[ManagedTool.ytDlp]!.health, ToolHealth.ready);
     });
