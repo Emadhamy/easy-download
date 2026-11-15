@@ -19,7 +19,7 @@ void main() {
         onConvert: () => actions.add('convert'),
       ));
 
-      await tester.tap(find.text('Choose FFmpeg'));
+      await tester.tap(find.text('Change FFmpeg'));
       await tester.tap(find.text('Check updates'));
       await tester.tap(find.text('Install / Update'));
       await tester.tap(find.text('Rollback'));
@@ -107,7 +107,7 @@ void main() {
       expect(find.textContaining('disabled on Android'), findsOneWidget);
       expect(
         tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Choose FFmpeg'),
+          find.widgetWithText(OutlinedButton, 'Change FFmpeg'),
         ).onPressed,
         isNull,
       );

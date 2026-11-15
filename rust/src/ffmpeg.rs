@@ -100,10 +100,32 @@ fn validate_bitrate(bitrate: &str) -> Result<(), String> {
 pub fn get_version(executable_path: impl AsRef<Path>) -> Result<String, String> {
     let executable = executable_path.as_ref();
     validate_executable(executable)?;
-    let output = Command::new(executable)
-        .args(["-hide_banner", "-version"])
-        .output()
-        .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+    // Linux can briefly return ETXTBSY when a freshly staged executable is
+    // still being released by the filesystem after extraction. Retry only that
+    // transient condition; all other launch errors are returned immediately.
+    let mut output = None;
+    for attempt in 0..5 {
+        match Command::new(executable)
+            .args(["-hide_banner", "-version"])
+            .output()
+        {
+            Ok(result) => {
+                output = Some(result);
+                break;
+            }
+            Err(error)
+                if cfg!(target_os = "linux")
+                    && error.raw_os_error() == Some(26)
+                    && attempt < 4 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10 * (attempt + 1)));
+            }
+            Err(error) => return Err(format!("Could not start FFmpeg: {error}")),
+        }
+    }
+    let output = output.ok_or_else(|| {
+        "Could not start FFmpeg after retrying a transient busy executable".to_string()
+    })?;
     if !output.status.success() {
         return Err(format!(
             "FFmpeg version probe failed: {}",
