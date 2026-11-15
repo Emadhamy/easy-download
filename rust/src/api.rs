@@ -158,7 +158,7 @@ fn request_headers_are_empty(headers_json: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn has_existing_partial_download(destination: &std::path::Path, segment_count: usize) -> bool {
+fn has_existing_partial_download(destination: &std::path::Path) -> bool {
     let mut partial = destination.as_os_str().to_os_string();
     partial.push(".easy-download.part");
     let mut metadata = destination.as_os_str().to_os_string();
@@ -215,7 +215,7 @@ pub fn download_file_resumable_controlled_with_headers_and_segments(
 
     let destination = std::path::PathBuf::from(destination_path);
     let eligible = request_headers_are_empty(&headers_json)
-        && !has_existing_partial_download(&destination, segment_count);
+        && !has_existing_partial_download(&destination);
 
     let result = (|| {
         if eligible {
@@ -272,7 +272,55 @@ pub fn download_file_resumable_controlled_with_headers_and_segments(
 
 #[cfg(test)]
 mod segmented_api_tests {
-    use super::request_headers_are_empty;
+    use super::{has_existing_partial_download, request_headers_are_empty};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "easy-download-segment-api-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create test directory");
+        path
+    }
+
+    #[test]
+    fn detects_stale_eighth_segment_when_retry_selects_four() {
+        let directory = test_directory();
+        let destination = directory.join("download.bin");
+        let stale_part = PathBuf::from(format!("{}.segment-7.part", destination.display()));
+        fs::write(&stale_part, b"partial").expect("write stale segment");
+
+        assert!(has_existing_partial_download(&destination));
+
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
+
+    #[test]
+    fn detects_single_connection_and_assembly_sidecars() {
+        let directory = test_directory();
+        let destination = directory.join("download.bin");
+
+        for suffix in [
+            ".easy-download.part",
+            ".easy-download.meta.json",
+            ".easy-download.assembling",
+        ] {
+            let sidecar = PathBuf::from(format!("{}{suffix}", destination.display()));
+            fs::write(sidecar, b"partial").expect("write sidecar");
+            assert!(has_existing_partial_download(&destination));
+            let sidecar = PathBuf::from(format!("{}{suffix}", destination.display()));
+            fs::remove_file(sidecar).expect("remove sidecar");
+        }
+
+        fs::remove_dir_all(directory).expect("clean test directory");
+    }
 
     #[test]
     fn only_empty_json_header_objects_are_eligible_for_segmentation() {
