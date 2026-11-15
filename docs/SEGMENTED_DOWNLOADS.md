@@ -1,6 +1,6 @@
 # Parallel segmented downloads
 
-Status: initial Rust orchestration implemented on `main`; durable recovery, Flutter settings/bridge integration, and platform rollout remain pending.
+Status: Rust orchestration and Flutter 4-to-8 segment preference/bridge routing are implemented on `main`; durable per-segment restart recovery, expanded failure coverage, and platform rollout remain pending.
 
 ## What exists today
 
@@ -31,7 +31,7 @@ Do not assume that a server supports ranges merely because it advertises `Accept
 - Keep the selected segment count as a per-download setting; changing it must not alter an already-running task.
 - Use a minimum file-size threshold before segmentation (initial proposal: 8 MiB); smaller files use the existing single-connection path.
 - Keep global download concurrency separate from per-file segment concurrency so total sockets remain bounded.
-- The Rust orchestration API now accepts a validated per-download segment count from 4 through 8, with `DEFAULT_SEGMENT_COUNT = 4` and `USER_MAX_SEGMENT_COUNT = 8`. Flutter settings and bridge wiring are still pending.
+- The Rust orchestration API accepts a validated per-download segment count from 4 through 8, with `DEFAULT_SEGMENT_COUNT = 4` and `USER_MAX_SEGMENT_COUNT = 8`. Flutter persists the preference, passes it through the generated bridge for direct downloads, and keeps yt-dlp format transfers on their separate path.
 - Do not promise a fixed speed multiplier. Server limits, connection quality, disk speed, and host throttling determine actual gains.
 
 ## Segment layout and persistence
@@ -100,6 +100,6 @@ macOS is a planned additional desktop target, not currently supported by the man
 1. Land the specification and tests for range arithmetic/response validation. (Done.)
 2. Implement the Rust range probe, manifest model, validated segment worker, and bounded parallel orchestration. (Initial implementation done; CI verification pending.)
 3. Add durable per-segment recovery, request fingerprinting, and restart-safe manifest persistence.
-4. Integrate the 4-to-8 user setting, pause/resume/cancel, and aggregate progress through the Flutter-Rust bridge and UI.
+4. Integrate the 4-to-8 user setting and aggregate progress through the Flutter-Rust bridge and UI. (Initial wiring done; pause/resume/cancel behavior still needs dedicated segmented-transfer verification.)
 5. Complete failure/retry/assembly tests and run the full CI matrix.
 6. Enable by default only after measured verification on Windows, Linux, and Android; retain single-connection fallback for unsupported servers.
