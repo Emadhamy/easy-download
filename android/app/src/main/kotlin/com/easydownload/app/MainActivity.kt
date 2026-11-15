@@ -145,7 +145,7 @@ class MainActivity : FlutterActivity() {
                             val sourceUrl = call.argument<String>("sourceUrl")
                                 ?: throw IllegalArgumentException("A source URL is required.")
                             val source = Uri.parse(sourceUrl)
-                            if (source.scheme != "http" && source.scheme != "https" || source.host.isNullOrBlank()) {
+                            if ((source.scheme != "http" && source.scheme != "https") || source.host.isNullOrBlank()) {
                                 throw IllegalArgumentException("Only valid HTTP(S) video URLs are supported.")
                             }
                             YoutubeDL.getInstance().init(applicationContext)
@@ -155,39 +155,9 @@ class MainActivity : FlutterActivity() {
                                 addOption("--no-warnings")
                                 addOption("--no-playlist")
                             }
-                            val output = YoutubeDL.getInstance().execute(request).out
-                            val info = JSONObject(output)
-                            val sourceFormats = info.optJSONArray("formats") ?: org.json.JSONArray()
-                            val formats = org.json.JSONArray()
-                            for (index in 0 until sourceFormats.length()) {
-                                val item = sourceFormats.optJSONObject(index) ?: continue
-                                val videoCodec = item.optString("vcodec", "none")
-                                val audioCodec = item.optString("acodec", "none")
-                                val hasVideo = videoCodec.isNotBlank() && videoCodec != "none"
-                                val hasAudio = audioCodec.isNotBlank() && audioCodec != "none"
-                                // Expose directly downloadable combined video and audio-only formats.
-                                // Video-only streams are withheld until FFmpeg can safely merge them.
-                                if (!hasAudio) continue
-                                val height = item.optInt("height", 0)
-                                val resolution = item.optString("resolution").takeIf { it.isNotBlank() && it != "NA" }
-                                    ?: if (height > 0) "${height}p" else "Unknown quality"
-                                val format = JSONObject()
-                                    .put("formatId", item.optString("format_id"))
-                                    .put("ext", item.optString("ext", "mp4"))
-                                    .put("resolution", resolution)
-                                    .put("fps", item.optDouble("fps").takeIf { !it.isNaN() && it > 0 })
-                                    .put("filesize", item.optLong("filesize", -1).takeIf { it > 0 })
-                                    .put("filesizeApprox", item.optLong("filesize_approx", -1).takeIf { it > 0 })
-                                    .put("hasVideo", hasVideo)
-                                    .put("hasAudio", hasAudio)
-                                    .put("audioBitrate", item.optDouble("abr").takeIf { !it.isNaN() && it > 0 })
-                                    .put("formatNote", item.optString("format_note"))
-                                formats.put(format)
-                            }
-                            val response = JSONObject()
-                                .put("title", info.optString("title", "Video"))
-                                .put("formats", formats)
-                            runOnUiThread { result.success(response.toString()) }
+                            val metadata = YoutubeDL.getInstance().execute(request).out
+                            val response = YtDlpFormatCatalog.fromMetadata(metadata)
+                            runOnUiThread { result.success(response) }
                         } catch (error: Exception) {
                             runOnUiThread { result.error("YTDLP_ANDROID_INSPECT_FAILED", error.message, null) }
                         }
