@@ -1,4 +1,4 @@
-package com.easydownload
+package com.easydownload.app
 
 /** Pending Android shares are retained until Flutter acknowledges that exact item. */
 internal class PendingSharedContentQueue(private val maxPending: Int = 20) {
