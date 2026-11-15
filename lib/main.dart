@@ -3090,7 +3090,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 const SizedBox(height: 6),
                 const Text(
                   'Default is 4. Choose up to 8 segments for eligible direct HTTP downloads. This setting applies to new downloads.',
-                  style: TextStyle(fontSize: 12, color: muted, height: 1.4),
+                  style: TextStyle(fontSize: 12, color: EasyDownloadPalette.muted, height: 1.4),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int>(
