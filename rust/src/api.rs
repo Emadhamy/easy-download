@@ -171,7 +171,9 @@ fn has_existing_partial_download(destination: &std::path::Path, segment_count: u
     {
         return true;
     }
-    (0..segment_count).any(|index| {
+    // Check the full supported range, not only the newly selected count.
+    // A previous attempt may have used 8 segments while this retry selects 4.
+    (0..crate::segmented::USER_MAX_SEGMENT_COUNT).any(|index| {
         let mut part = destination.as_os_str().to_os_string();
         part.push(format!(".segment-{index}.part"));
         std::path::Path::new(&part).exists()
