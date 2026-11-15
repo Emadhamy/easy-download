@@ -211,6 +211,19 @@ jobs:
             rust/src/frb_generated.rs
           if-no-files-found: error
 
-      - name: Run Rust tests
+      - name: Install real FFmpeg and ffprobe for integration test
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+          ffmpeg -version
+          ffmpeg -hide_banner -encoders | grep -F libmp3lame
+          ffprobe -version
+
+      - name: Run Rust unit and real FFmpeg integration tests
         working-directory: rust
-        run: cargo test
+        env:
+          FFMPEG_BIN: /usr/bin/ffmpeg
+          FFPROBE_BIN: /usr/bin/ffprobe
+        run: |
+          cargo test
+          cargo test real_ffmpeg_conversion_produces_valid_mp3 -- --ignored
