@@ -1193,7 +1193,7 @@ mod orchestrator_tests {
         let (url, server) = range_server(body.clone(), DEFAULT_SEGMENT_COUNT);
         let probe = RangeProbe {
             total_bytes: body.len() as u64,
-            validator: "\\"orchestrator-v1\\"".to_string(),
+            validator: "\"orchestrator-v1\"".to_string(),
             validator_is_etag: true,
         };
         let manifest = SegmentManifest::new(&probe, DEFAULT_SEGMENT_COUNT).unwrap();
