@@ -11,6 +11,7 @@ import 'src/utils/shared_url_parser.dart';
 import 'src/storage/download_history_store.dart';
 import 'src/theme/easy_download_theme.dart';
 import 'src/media/ffmpeg_manager_config.dart';
+import 'src/media/ffmpeg_manager_card.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -984,218 +985,39 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
   }
 
   Widget _buildFfmpegManagerCard() {
-    final supported = _ffmpegSupported;
-    final progress = _ffmpegTotalMillis != null && _ffmpegTotalMillis! > 0
-        ? (_ffmpegElapsedMillis / _ffmpegTotalMillis!).clamp(0.0, 1.0).toDouble()
-        : null;
-    String timeLabel(int millis) {
-      final seconds = millis ~/ 1000;
-      final minutes = seconds ~/ 60;
-      return minutes.toString().padLeft(2, '0') + ':' +
-          (seconds % 60).toString().padLeft(2, '0');
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.graphic_eq_rounded, color: Color(0xFF60A5FA), size: 25),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text('FFmpeg manager',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: supported
-                        ? const Color(0xFF16A34A).withValues(alpha: 0.14)
-                        : Colors.orange.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(supported ? 'DESKTOP' : 'NOT AVAILABLE',
-                      style: TextStyle(
-                        color: supported ? const Color(0xFF4ADE80) : Colors.orangeAccent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                      )),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text('Installed: ' + (_ffmpegVersion ?? 'Not installed')),
-            Text('Latest official: ${_ffmpegLatestVersion ?? 'Not checked'}'),
-            Text(
-              'Last check: ${_ffmpegLastCheckedAt == null ? 'Not checked yet' : (DateTime.tryParse(_ffmpegLastCheckedAt!)?.toLocal().toString().substring(0, 16) ?? 'Unknown')}',
-              style: const TextStyle(color: Color(0xFF9A9AAF), fontSize: 12),
-            ),
-            if (_ffmpegExecutablePath != null) ...[
-              const SizedBox(height: 4),
-              Text(_ffmpegExecutablePath!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFF9A9AAF), fontSize: 11)),
-            ],
-            const SizedBox(height: 10),
-            Text(_ffmpegStatus, style: const TextStyle(color: Color(0xFFBDBDCE))),
-            if (_ffmpegInstalling) ...[
-              const SizedBox(height: 10),
-              LinearProgressIndicator(
-                value: _ffmpegTotalBytes != null && _ffmpegTotalBytes! > 0
-                    ? (_ffmpegReceivedBytes / _ffmpegTotalBytes!).clamp(0.0, 1.0).toDouble()
-                    : null,
-              ),
-              const SizedBox(height: 5),
-              Text(
-                _ffmpegTotalBytes == null
-                    ? _formatYtDlpBytes(_ffmpegReceivedBytes)
-                    : '${_formatYtDlpBytes(_ffmpegReceivedBytes)} / ${_formatYtDlpBytes(_ffmpegTotalBytes!)}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AAF)),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: supported && !_ffmpegConverting ? _chooseFfmpegExecutable : null,
-                  icon: const Icon(Icons.folder_open_rounded),
-                  label: Text(_ffmpegVersion == null ? 'Choose FFmpeg' : 'Change FFmpeg'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: supported && !_ffmpegConverting && !_ffmpegChecking && !_ffmpegInstalling
-                      ? () => _checkFfmpegUpdates()
-                      : null,
-                  icon: _ffmpegChecking
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.refresh_rounded),
-                  label: const Text('Check updates'),
-                ),
-                FilledButton.icon(
-                  onPressed: supported && !_ffmpegConverting && !_ffmpegChecking &&
-                          !_ffmpegInstalling && _ffmpegLatestVersion != null &&
-                          _ffmpegLatestVersion != _ffmpegVersion
-                      ? _installLatestFfmpeg
-                      : null,
-                  icon: const Icon(Icons.system_update_alt_rounded),
-                  label: Text(_ffmpegInstalling ? 'Updating...' : 'Install / Update'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: supported && !_ffmpegConverting && !_ffmpegInstalling
-                      ? _rollbackFfmpeg
-                      : null,
-                  icon: const Icon(Icons.history_rounded),
-                  label: const Text('Rollback'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: supported && !_ffmpegConverting && _ffmpegExecutablePath != null
-                      ? () => _verifyFfmpegExecutable(_ffmpegExecutablePath!, persist: true)
-                      : null,
-                  icon: const Icon(Icons.verified_outlined),
-                  label: const Text('Verify'),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            const Text('Video to MP3', style: TextStyle(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 6),
-            OutlinedButton.icon(
-              onPressed: supported && !_ffmpegConverting ? _chooseVideoForMp3 : null,
-              icon: const Icon(Icons.video_file_outlined),
-              label: Text(_ffmpegInputPath == null
-                  ? 'Choose video file'
-                  : _ffmpegInputPath!.split(RegExp(r'[\\/]')).last),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: _ffmpegBitrate,
-              decoration: const InputDecoration(
-                labelText: 'MP3 quality',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              items: ffmpegMp3Bitrates
-                  .map((rate) => DropdownMenuItem(value: rate, child: Text(rate)))
-                  .toList(),
-              onChanged: supported && !_ffmpegConverting
-                  ? (value) {
-                      if (value != null) setState(() => _ffmpegBitrate = value);
-                    }
-                  : null,
-            ),
-            if (_ffmpegConverting) ...[
-              const SizedBox(height: 12),
-              LinearProgressIndicator(value: progress),
-              const SizedBox(height: 5),
-              Text(
-                _ffmpegTotalMillis == null
-                    ? timeLabel(_ffmpegElapsedMillis)
-                    : timeLabel(_ffmpegElapsedMillis) + ' / ' + timeLabel(_ffmpegTotalMillis!),
-                style: const TextStyle(fontSize: 12, color: Color(0xFF9A9AAF)),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: supported &&
-                          !_ffmpegConverting &&
-                          _ffmpegExecutablePath != null &&
-                          _ffmpegInputPath != null
-                      ? _convertSelectedVideoToMp3
-                      : null,
-                  icon: const Icon(Icons.music_note_rounded),
-                  label: const Text('Convert to MP3'),
-                ),
-                if (_ffmpegConverting)
-                  OutlinedButton.icon(
-                    onPressed: _ffmpegPaused ? _resumeFfmpegConversion : _pauseFfmpegConversion,
-                    icon: Icon(_ffmpegPaused ? Icons.play_arrow_rounded : Icons.pause_rounded),
-                    label: Text(_ffmpegPaused ? 'Resume' : 'Pause'),
-                  ),
-                if (_ffmpegConverting)
-                  OutlinedButton.icon(
-                    onPressed: _cancelFfmpegConversion,
-                    icon: const Icon(Icons.close_rounded),
-                    label: const Text('Cancel'),
-                  ),
-              ],
-            ),
-            if (supported) ...[
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Automatic update checks'),
-                subtitle: const Text('Check the official release every 24 hours while Easy Download is open.'),
-                value: _ffmpegAutoCheckEnabled,
-                onChanged: !_ffmpegInstalling && !_ffmpegChecking ? _setFfmpegAutoCheck : null,
-              ),
-              if (_ffmpegHistory.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                const Text('Recent FFmpeg updates', style: TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
-                ..._ffmpegHistory.take(3).map((entry) => Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(entry, style: const TextStyle(fontSize: 11, color: Color(0xFF9A9AAF))),
-                )),
-              ],
-            ],
-            if (!supported) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'FFmpeg managed installation and conversion are disabled on Android until a compatible, verified runtime is provided.',
-                style: TextStyle(fontSize: 12, color: Color(0xFFFFB86B)),
-              ),
-            ],
-          ],
-        ),
-      ),
+    return FfmpegManagerCard(
+      supported: _ffmpegSupported,
+      installedVersion: _ffmpegVersion,
+      latestVersion: _ffmpegLatestVersion,
+      lastCheckedAt: _ffmpegLastCheckedAt,
+      executablePath: _ffmpegExecutablePath,
+      status: _ffmpegStatus,
+      checking: _ffmpegChecking,
+      installing: _ffmpegInstalling,
+      receivedBytes: _ffmpegReceivedBytes,
+      totalBytes: _ffmpegTotalBytes,
+      converting: _ffmpegConverting,
+      paused: _ffmpegPaused,
+      inputPath: _ffmpegInputPath,
+      bitrate: _ffmpegBitrate,
+      elapsedMillis: _ffmpegElapsedMillis,
+      totalMillis: _ffmpegTotalMillis,
+      autoCheckEnabled: _ffmpegAutoCheckEnabled,
+      history: _ffmpegHistory,
+      onChooseExecutable: _chooseFfmpegExecutable,
+      onCheckUpdates: () => _checkFfmpegUpdates(),
+      onInstallLatest: _installLatestFfmpeg,
+      onRollback: _rollbackFfmpeg,
+      onVerify: () => _verifyFfmpegExecutable(_ffmpegExecutablePath!, persist: true),
+      onChooseVideo: _chooseVideoForMp3,
+      onBitrateChanged: (value) {
+        if (value != null) setState(() => _ffmpegBitrate = value);
+      },
+      onConvert: _convertSelectedVideoToMp3,
+      onPause: _pauseFfmpegConversion,
+      onResume: _resumeFfmpegConversion,
+      onCancel: _cancelFfmpegConversion,
+      onAutoCheckChanged: _setFfmpegAutoCheck,
     );
   }
 
