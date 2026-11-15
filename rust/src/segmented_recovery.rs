@@ -220,6 +220,20 @@ pub fn prepare_recovery(
 
     remove_stale_worker_temps(destination)?;
 
+    let mut assembly_name = destination.as_os_str().to_os_string();
+    assembly_name.push(".easy-download.assembling");
+    let assembly = PathBuf::from(assembly_name);
+    match fs::remove_file(&assembly) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Could not discard interrupted assembly staging file: {error}")),
+    }
+
+    let completed = reconcile_parts(destination, &mut manifest)?;
+    save_atomic(&sidecar, &manifest)?;
+    Ok((manifest, completed))
+}
+
 /// Removes abandoned worker staging files left by a process crash. Symlinks
 /// are unlinked rather than followed; unexpected directories fail safely.
 fn remove_stale_worker_temps(destination: &Path) -> Result<(), String> {
@@ -236,22 +250,6 @@ fn remove_stale_worker_temps(destination: &Path) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-    remove_stale_worker_temps(destination)?;
-
-    let mut assembly_name = destination.as_os_str().to_os_string();
-    assembly_name.push(".easy-download.assembling");
-    let assembly = PathBuf::from(assembly_name);
-    match fs::remove_file(&assembly) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("Could not discard interrupted assembly staging file: {error}")),
-    }
-
-    let completed = reconcile_parts(destination, &mut manifest)?;
-    save_atomic(&sidecar, &manifest)?;
-    Ok((manifest, completed))
 }
 
 #[cfg(unix)]
