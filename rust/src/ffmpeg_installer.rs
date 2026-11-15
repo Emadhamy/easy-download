@@ -751,4 +751,68 @@ mod tests {
         invalid.download_url = "https://example.com/ffmpeg.tar.xz".to_string();
         assert!(validate_candidate(&invalid, "linux-x86_64").is_err());
     }
+
+    #[test]
+    fn extracts_only_expected_windows_zip_executable() {
+        use super::extract_zip;
+        use std::io::Write;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use zip::write::SimpleFileOptions;
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-zip-fixture-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let archive_path = directory.join("fixture.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default().unix_permissions(0o644);
+
+        archive.start_file("package/README.txt", options).unwrap();
+        archive.write_all(b"not the executable").unwrap();
+        archive.start_file("package/bin/ffmpeg.exe", options).unwrap();
+        archive.write_all(b"windows-ffmpeg-fixture-bytes").unwrap();
+        archive.finish().unwrap();
+
+        let extracted = directory.join("ffmpeg.exe");
+        extract_zip(&archive_path, &extracted, "ffmpeg.exe").unwrap();
+
+        assert_eq!(
+            std::fs::read(&extracted).unwrap(),
+            b"windows-ffmpeg-fixture-bytes"
+        );
+        assert!(extracted.is_file());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_windows_zip_without_expected_executable() {
+        use super::extract_zip;
+        use std::io::Write;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use zip::write::SimpleFileOptions;
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-zip-invalid-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let archive_path = directory.join("missing-executable.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive.start_file("package/bin/ffprobe.exe", SimpleFileOptions::default()).unwrap();
+        archive.write_all(b"not-ffmpeg").unwrap();
+        archive.finish().unwrap();
+
+        let extracted = directory.join("ffmpeg.exe");
+        let error = extract_zip(&archive_path, &extracted, "ffmpeg.exe").unwrap_err();
+
+        assert!(error.contains("does not contain bin/ffmpeg.exe"));
+        assert!(!extracted.exists());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
 }
