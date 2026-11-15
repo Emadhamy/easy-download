@@ -559,6 +559,22 @@ pub fn download_segment_to_part(
     part_path: impl AsRef<std::path::Path>,
     control: crate::DownloadControl,
 ) -> Result<u64, String> {
+    download_segment_to_part_with_progress(
+        input_url, manifest, segment_index, part_path, control, |_| {},
+    )
+}
+
+fn download_segment_to_part_with_progress<F>(
+    input_url: &str,
+    manifest: &SegmentManifest,
+    segment_index: usize,
+    part_path: impl AsRef<std::path::Path>,
+    control: crate::DownloadControl,
+    mut on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(u64),
+{
     use reqwest::header::{CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED};
     use reqwest::StatusCode;
     use std::fs::{self, OpenOptions};
@@ -626,6 +642,7 @@ pub fn download_segment_to_part(
             output.write_all(&buffer[..count])
                 .map_err(|error| format!("Could not write segment data: {error}"))?;
             received = next;
+            on_progress(received);
         }
         if received != segment.range.len() {
             return Err(format!("Incomplete segment: received {received} of {} bytes", segment.range.len()));
@@ -820,8 +837,8 @@ const SEGMENT_ATTEMPTS: usize = 3;
 /// the verified parts in order into the destination only after every worker
 /// succeeds. The caller may select 4 through 8 segments; four is the default.
 ///
-/// Progress is reported whenever a complete segment is safely written. The
-/// callback receives completed segments, total segments, completed bytes, and
+/// Progress is reported as bytes arrive from every worker. The callback
+/// receives completed segments, total segments, aggregate received bytes, and
 /// total bytes. This first orchestration layer deliberately keeps recovery
 /// metadata out of scope; durable per-segment restart recovery is a later step.
 pub fn download_segmented_to_path<F>(
@@ -881,10 +898,15 @@ where
     }
 
     let shared_control = control.clone();
-    let (sender, receiver) = mpsc::channel();
+    enum WorkerMessage {
+        Progress(usize, u64),
+        Finished(usize, Result<u64, String>),
+    }
+
+    let (sender, receiver) = mpsc::channel::<WorkerMessage>();
     let mut first_error: Option<String> = None;
     let mut completed_segments = 0_usize;
-    let mut completed_bytes = 0_u64;
+    let mut segment_progress = vec![0_u64; segment_count];
 
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(segment_count);
@@ -900,18 +922,24 @@ where
                         last_error = Some("Download cancelled".to_string());
                         break;
                     }
+                    // A retry starts a fresh response, so remove this attempt's
+                    // previous contribution from the aggregate progress.
+                    let _ = sender.send(WorkerMessage::Progress(index, 0));
                     if part_path.exists() {
                         let _ = fs::remove_file(&part_path);
                     }
-                    match download_segment_to_part(
+                    match download_segment_to_part_with_progress(
                         &worker_url,
                         &worker_manifest,
                         index,
                         &part_path,
                         worker_control.clone(),
+                        |received| {
+                            let _ = sender.send(WorkerMessage::Progress(index, received));
+                        },
                     ) {
                         Ok(bytes) => {
-                            let _ = sender.send((index, Ok(bytes)));
+                            let _ = sender.send(WorkerMessage::Finished(index, Ok(bytes)));
                             return;
                         }
                         Err(error) => {
@@ -923,7 +951,7 @@ where
                         }
                     }
                 }
-                let _ = sender.send((
+                let _ = sender.send(WorkerMessage::Finished(
                     index,
                     Err(last_error.unwrap_or_else(|| "Segment failed without an error detail".to_string())),
                 ));
@@ -931,19 +959,37 @@ where
         }
         drop(sender);
 
-        for _ in 0..segment_count {
+        let mut finished_workers = 0_usize;
+        while finished_workers < segment_count {
             match receiver.recv() {
-                Ok((_index, Ok(bytes))) => {
-                    completed_segments += 1;
-                    completed_bytes = completed_bytes.saturating_add(bytes);
+                Ok(WorkerMessage::Progress(index, received)) => {
+                    if let Some(progress) = segment_progress.get_mut(index) {
+                        *progress = received;
+                    }
+                    let received_total = segment_progress.iter().copied().sum();
                     on_progress(
                         completed_segments,
                         segment_count,
-                        completed_bytes,
+                        received_total,
                         manifest.total_bytes,
                     );
                 }
-                Ok((_index, Err(error))) => {
+                Ok(WorkerMessage::Finished(index, Ok(bytes))) => {
+                    finished_workers += 1;
+                    completed_segments += 1;
+                    if let Some(progress) = segment_progress.get_mut(index) {
+                        *progress = bytes;
+                    }
+                    let received_total = segment_progress.iter().copied().sum();
+                    on_progress(
+                        completed_segments,
+                        segment_count,
+                        received_total,
+                        manifest.total_bytes,
+                    );
+                }
+                Ok(WorkerMessage::Finished(_index, Err(error))) => {
+                    finished_workers += 1;
                     if first_error.is_none() {
                         first_error = Some(error);
                     }
@@ -965,6 +1011,8 @@ where
             }
         }
     });
+
+    let completed_bytes: u64 = segment_progress.iter().copied().sum();
 
     if let Some(error) = first_error {
         for path in &part_paths { let _ = fs::remove_file(path); }
