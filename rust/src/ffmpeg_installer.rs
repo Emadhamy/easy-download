@@ -488,18 +488,23 @@ where F: FnMut(&str, u64, Option<u64>) {
             sha256: executable_hash,
             encoder: "libmp3lame".to_string(),
         };
-        let active_path = root.join("active.json");
-        if active_path.exists() {
-            let previous = read_pointer(&active_path)?;
-            write_json_atomically(&root.join("previous.json"), &previous)?;
-        }
-        write_json_atomically(&active_path, &active)?;
+        activate_verified_installation(root, &active)?;
         on_progress("installed", 1, Some(1));
         let _ = version_output;
         Ok(active)
     })();
     if stage.exists() { let _ = fs::remove_dir_all(&stage); }
     result
+}
+
+/// Publishes a previously verified FFmpeg version, preserving the current pointer for rollback.
+fn activate_verified_installation(root: &Path, active: &ActiveFfmpeg) -> Result<(), String> {
+    let active_path = root.join("active.json");
+    if active_path.exists() {
+        let previous = read_pointer(&active_path)?;
+        write_json_atomically(&root.join("previous.json"), &previous)?;
+    }
+    write_json_atomically(&active_path, active)
 }
 
 fn read_installed_binary(path: &Path) -> Result<PathBuf, String> {
@@ -566,6 +571,91 @@ mod tests {
         assert_eq!(fs::read(&destination).unwrap(), b"new-active");
         assert!(!source.exists());
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn first_verified_installation_creates_active_pointer_without_previous() {
+        use super::{activate_verified_installation, read_pointer, ActiveFfmpeg};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-first-activation-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let active = ActiveFfmpeg {
+            version: "first-build".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            executable_path: "versions/first-build/ffmpeg".to_string(),
+            sha256: "a".repeat(64),
+            encoder: "libmp3lame".to_string(),
+        };
+
+        activate_verified_installation(&root, &active).unwrap();
+
+        assert_eq!(read_pointer(&root.join("active.json")).unwrap(), active);
+        assert!(!root.join("previous.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn verified_upgrade_preserves_previous_active_pointer_before_switching() {
+        use super::{activate_verified_installation, read_pointer, write_json_atomically, ActiveFfmpeg};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-upgrade-activation-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let previous = ActiveFfmpeg {
+            version: "old-build".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            executable_path: "versions/old-build/ffmpeg".to_string(),
+            sha256: "b".repeat(64),
+            encoder: "libmp3lame".to_string(),
+        };
+        let next = ActiveFfmpeg {
+            version: "new-build".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            executable_path: "versions/new-build/ffmpeg".to_string(),
+            sha256: "c".repeat(64),
+            encoder: "libmp3lame".to_string(),
+        };
+        write_json_atomically(&root.join("active.json"), &previous).unwrap();
+
+        activate_verified_installation(&root, &next).unwrap();
+
+        assert_eq!(read_pointer(&root.join("active.json")).unwrap(), next);
+        assert_eq!(read_pointer(&root.join("previous.json")).unwrap(), previous);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_existing_active_pointer_blocks_upgrade_without_overwriting_it() {
+        use super::activate_verified_installation;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-invalid-pointer-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let active_path = root.join("active.json");
+        let invalid_pointer = b"{ invalid pointer";
+        std::fs::write(&active_path, invalid_pointer).unwrap();
+        let next = super::ActiveFfmpeg {
+            version: "new-build".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            executable_path: "versions/new-build/ffmpeg".to_string(),
+            sha256: "c".repeat(64),
+            encoder: "libmp3lame".to_string(),
+        };
+
+        assert!(activate_verified_installation(&root, &next).is_err());
+        assert_eq!(std::fs::read(&active_path).unwrap(), invalid_pointer);
+        assert!(!root.join("previous.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
