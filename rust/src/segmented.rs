@@ -1188,6 +1188,42 @@ mod orchestrator_tests {
     }
 
     #[test]
+    fn paused_segmented_download_waits_until_resumed() {
+        let body = fixture();
+        let (url, server) = range_server(body.clone(), DEFAULT_SEGMENT_COUNT);
+        let probe = RangeProbe {
+            total_bytes: body.len() as u64,
+            validator: "\\"orchestrator-v1\\"".to_string(),
+            validator_is_etag: true,
+        };
+        let manifest = SegmentManifest::new(&probe, DEFAULT_SEGMENT_COUNT).unwrap();
+        let path = destination("pause-resume");
+        let control = DownloadControl::new();
+        control.pause();
+
+        let resume_control = control.clone();
+        let resume = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(40));
+            resume_control.resume();
+        });
+
+        let received = download_segmented_to_path(
+            &url,
+            &manifest,
+            &path,
+            DEFAULT_SEGMENT_COUNT,
+            control,
+            |_, _, _, _| {},
+        ).unwrap();
+
+        resume.join().unwrap();
+        server.join().unwrap();
+        assert_eq!(received, body.len() as u64);
+        assert_eq!(std::fs::read(&path).unwrap(), body);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rejects_segment_count_outside_user_settings() {
         let probe = RangeProbe {
             total_bytes: 64,
