@@ -277,7 +277,6 @@ fn extract_tar_xz(archive_path: &Path, destination: &Path, executable_name: &str
         output.sync_all()
             .map_err(|error| format!("Could not sync extracted FFmpeg executable: {error}"))?;
         drop(output);
-        drop(entry);
         found = true;
     }
     if !found { return Err("The FFmpeg TAR.XZ does not contain bin/ffmpeg".to_string()); }
