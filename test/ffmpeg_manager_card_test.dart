@@ -24,7 +24,7 @@ void main() {
       await tester.tap(find.text('Install / Update'));
       await tester.tap(find.text('Rollback'));
       await tester.tap(find.text('Verify'));
-      await tester.tap(find.text('Choose video file'));
+      await tester.tap(find.text('sample.mp4'));
       await tester.tap(find.text('Convert to MP3'));
       await tester.pump();
 
