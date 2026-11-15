@@ -433,6 +433,30 @@ pub fn install_release<F>(
     mut on_progress: F,
 ) -> Result<ActiveFfmpeg, String>
 where F: FnMut(&str, u64, Option<u64>) {
+    install_release_with_downloader(
+        candidate,
+        target,
+        install_root,
+        on_progress,
+        |url, destination, sha256, progress| {
+            download_and_verify(url, destination, sha256, |received, total| {
+                progress(received, total)
+            })
+        },
+    )
+}
+
+fn install_release_with_downloader<F, D>(
+    candidate: &LatestFfmpegRelease,
+    target: &str,
+    install_root: impl AsRef<Path>,
+    mut on_progress: F,
+    mut download: D,
+) -> Result<ActiveFfmpeg, String>
+where
+    F: FnMut(&str, u64, Option<u64>),
+    D: FnMut(&str, &Path, &str, &mut dyn FnMut(u64, Option<u64>)) -> Result<u64, String>,
+{
     let format = validate_candidate(candidate, target)?;
     let (_, _, executable_name) = expected_asset(target)?;
     let root = install_root.as_ref();
@@ -453,8 +477,12 @@ where F: FnMut(&str, u64, Option<u64>) {
     let result = (|| {
         let archive_path = stage.join(&candidate.asset_name);
         on_progress("downloading", 0, None);
-        download_and_verify(&candidate.download_url, &archive_path, &candidate.sha256,
-            |received, total| on_progress("downloading", received, total))?;
+        download(
+            &candidate.download_url,
+            &archive_path,
+            &candidate.sha256,
+            &mut |received, total| on_progress("downloading", received, total),
+        )?;
         on_progress("verifying", 1, Some(1));
         let staged_executable = stage.join(executable_name);
         on_progress("extracting", 0, None);
@@ -739,6 +767,97 @@ mod tests {
         };
         assert!(validate_candidate(&candidate, "linux-x86_64")
             .unwrap_err().contains("SHA-256"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn installs_verified_release_end_to_end_and_keeps_previous_for_rollback() {
+        use super::{active_installation, hash_file, install_release_with_downloader, rollback, ActiveFfmpeg};
+        use crate::ffmpeg_updates::LatestFfmpegRelease;
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-e2e-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let make_archive = |version: &str| {
+            let source = root.join(format!("fake-ffmpeg-{version}"));
+            let script = format!(
+                "#!/bin/sh\\ncase \\"$*\\" in\\n  *-version*) echo 'ffmpeg version {version}'; exit 0 ;;\\n  *-encoders*) printf '%s\\n' ' V....D libmp3lame MP3 encoder'; exit 0 ;;\\nesac\\nexit 2\\n"
+            );
+            std::fs::write(&source, script).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&source).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&source, permissions).unwrap();
+            let bytes = std::fs::read(&source).unwrap();
+            let archive_path = root.join(format!("{version}.tar.xz"));
+            let file = std::fs::File::create(&archive_path).unwrap();
+            let encoder = xz2::write::XzEncoder::new(file, 6);
+            let mut archive = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive.append_data(&mut header, "package/bin/ffmpeg", bytes.as_slice()).unwrap();
+            archive.into_inner().unwrap().finish().unwrap();
+            let archive_bytes = std::fs::read(&archive_path).unwrap();
+            let digest = format!("{:x}", Sha256::digest(&archive_bytes));
+            (archive_bytes, digest)
+        };
+
+        let install = |version: &str, archive_bytes: Vec<u8>, digest: String| {
+            let candidate = LatestFfmpegRelease {
+                version: version.to_string(),
+                asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+                download_url: format!("https://github.com/BtbN/FFmpeg-Builds/releases/download/{version}/ffmpeg-master-latest-linux64-gpl.tar.xz"),
+                sha256: digest,
+                release_page: format!("https://github.com/BtbN/FFmpeg-Builds/releases/tag/{version}"),
+                published_at: "2026-11-15T00:00:00Z".to_string(),
+            };
+            install_release_with_downloader(
+                &candidate,
+                "linux-x86_64",
+                &root,
+                |_, _, _| {},
+                move |_url, destination, expected, progress| {
+                    std::fs::write(destination, &archive_bytes)
+                        .map_err(|error| format!("fixture archive write failed: {error}"))?;
+                    let actual = hash_file(destination)?;
+                    if actual != expected {
+                        return Err("fixture publisher checksum mismatch".to_string());
+                    }
+                    progress(archive_bytes.len() as u64, Some(archive_bytes.len() as u64));
+                    Ok(archive_bytes.len() as u64)
+                },
+            ).unwrap()
+        };
+
+        let (first_archive, first_digest) = make_archive("first-build");
+        let first = install("first-build", first_archive, first_digest);
+        assert_eq!(active_installation(&root).unwrap(), first);
+
+        let (second_archive, second_digest) = make_archive("second-build");
+        let second = install("second-build", second_archive, second_digest);
+        assert_eq!(active_installation(&root).unwrap(), second);
+        assert_eq!(
+            super::read_pointer(&root.join("previous.json")).unwrap(),
+            first
+        );
+
+        let restored = rollback(&root).unwrap();
+        assert_eq!(restored.version, "first-build");
+        assert_eq!(active_installation(&root).unwrap(), first);
+        assert_eq!(
+            super::read_pointer(&root.join("previous.json")).unwrap(),
+            second
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
