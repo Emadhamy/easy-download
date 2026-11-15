@@ -306,7 +306,7 @@ exit 0
     #[test]
     fn parses_ffmpeg_duration() {
         assert_eq!(
-            parse_duration_millis("Input #0, mp4, from 'x':\\n  Duration: 00:01:02.500, start: 0"),
+            parse_duration_millis("Input #0, mp4, from 'x':\n  Duration: 00:01:02.500, start: 0"),
             Some(62_500)
         );
         assert_eq!(parse_duration_millis("Duration: N/A"), None);
