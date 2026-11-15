@@ -1233,20 +1233,26 @@ mod orchestrator_tests {
         let address = listener.local_addr().unwrap();
         let server_body = body.clone();
         let server = thread::spawn(move || {
-            let mut handlers = Vec::new();
+            // Accept every worker before sending any response. This guarantees
+            // cancellation cannot prevent the fixture from accepting its peers.
+            let mut streams = Vec::new();
             for _ in 0..DEFAULT_SEGMENT_COUNT {
                 let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 2048];
+                loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    if count == 0 { break; }
+                    request.extend_from_slice(&buffer[..count]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") { break; }
+                }
+                streams.push((stream, String::from_utf8_lossy(&request).into_owned()));
+            }
+
+            let mut handlers = Vec::new();
+            for (mut stream, request) in streams {
                 let body = server_body.clone();
                 handlers.push(thread::spawn(move || {
-                    let mut request = Vec::new();
-                    let mut buffer = [0_u8; 2048];
-                    loop {
-                        let count = stream.read(&mut buffer).unwrap();
-                        if count == 0 { break; }
-                        request.extend_from_slice(&buffer[..count]);
-                        if request.windows(4).any(|window| window == b"\r\n\r\n") { break; }
-                    }
-                    let request = String::from_utf8_lossy(&request);
                     let range_line = request.lines()
                         .find(|line| line.to_ascii_lowercase().starts_with("range:"))
                         .expect("worker must send Range header");
@@ -1268,7 +1274,7 @@ mod orchestrator_tests {
                 }));
             }
             for handler in handlers { handler.join().unwrap(); }
-        });
+        });;
 
         let probe = RangeProbe {
             total_bytes: body.len() as u64,
