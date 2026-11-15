@@ -111,15 +111,16 @@ pub fn load(path: &Path) -> Result<RecoveryManifest, String> {
     Ok(manifest)
 }
 
-/// Reconciles sidecar progress with durable part files. Only exact-length files
-/// are considered complete; truncated or oversized files are discarded.
+/// Reconciles sidecar progress with durable part files. Only regular files with
+/// the exact expected length are considered complete; symlinks and truncated
+/// or oversized files are discarded.
 pub fn reconcile_parts(destination: &Path, manifest: &mut RecoveryManifest) -> Result<usize, String> {
     manifest.validate()?;
     let mut completed = 0;
     for segment in &mut manifest.transfer.segments {
         let part = segment_part_path(destination, segment.index);
-        match fs::metadata(&part) {
-            Ok(metadata) if metadata.is_file() && metadata.len() == segment.range.len() => {
+        match fs::symlink_metadata(&part) {
+            Ok(metadata) if metadata.file_type().is_file() && metadata.len() == segment.range.len() => {
                 segment.received_bytes = segment.range.len();
                 completed += 1;
             }
@@ -135,6 +136,88 @@ pub fn reconcile_parts(destination: &Path, manifest: &mut RecoveryManifest) -> R
         }
     }
     Ok(completed)
+}
+
+/// Loads or safely initializes recovery state for one direct HTTP transfer.
+/// Existing parts are reused only when the request fingerprint, remote
+/// validator, total length, and segment layout all match the current probe.
+pub fn prepare_recovery(
+    input_url: &str,
+    request_headers_json: &str,
+    destination: &Path,
+    probe: &crate::segmented::RangeProbe,
+    segment_count: usize,
+) -> Result<(RecoveryManifest, usize), String> {
+    use crate::segmented::SegmentManifest;
+
+    if !(crate::segmented::DEFAULT_SEGMENT_COUNT..=crate::segmented::USER_MAX_SEGMENT_COUNT)
+        .contains(&segment_count)
+    {
+        return Err(format!(
+            "Recovery segment count must be between {} and {}",
+            crate::segmented::DEFAULT_SEGMENT_COUNT,
+            crate::segmented::USER_MAX_SEGMENT_COUNT
+        ));
+    }
+    let expected_fingerprint = request_fingerprint(input_url, request_headers_json)?;
+    let sidecar = sidecar_path(destination);
+    let mut reusable = None;
+
+    match fs::symlink_metadata(&sidecar) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            if let Ok(existing) = load(&sidecar) {
+                let transfer = &existing.transfer;
+                if existing.request_fingerprint == expected_fingerprint
+                    && transfer.total_bytes == probe.total_bytes
+                    && transfer.validator == probe.validator
+                    && transfer.validator_is_etag == probe.validator_is_etag
+                    && transfer.segments.len() == segment_count
+                {
+                    reusable = Some(existing);
+                }
+            }
+        }
+        Ok(_) => {
+            fs::remove_file(&sidecar)
+                .map_err(|error| format!("Could not remove unsafe recovery sidecar: {error}"))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Could not inspect recovery sidecar: {error}")),
+    }
+
+    let mut manifest = if let Some(existing) = reusable {
+        existing
+    } else {
+        for index in 0..crate::segmented::USER_MAX_SEGMENT_COUNT {
+            let part = segment_part_path(destination, index);
+            match fs::symlink_metadata(&part) {
+                Ok(_) => fs::remove_file(&part)
+                    .map_err(|error| format!("Could not discard stale segment part {index}: {error}"))?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(format!("Could not inspect stale segment part {index}: {error}")),
+            }
+        }
+        match fs::remove_file(&sidecar) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Could not replace stale recovery sidecar: {error}")),
+        }
+        let transfer = SegmentManifest::new(probe, segment_count)?;
+        RecoveryManifest::new(input_url, request_headers_json, transfer)?
+    };
+
+    let mut assembly_name = destination.as_os_str().to_os_string();
+    assembly_name.push(".easy-download.assembling");
+    let assembly = PathBuf::from(assembly_name);
+    match fs::remove_file(&assembly) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Could not discard interrupted assembly staging file: {error}")),
+    }
+
+    let completed = reconcile_parts(destination, &mut manifest)?;
+    save_atomic(&sidecar, &manifest)?;
+    Ok((manifest, completed))
 }
 
 #[cfg(unix)]
@@ -241,5 +324,38 @@ mod tests {
         assert!(!second.exists());
         fs::remove_file(first).unwrap();
         let _ = fs::remove_file(third);
+    }
+
+    #[test]
+    fn prepare_recovery_reuses_parts_only_for_same_request_and_validator() {
+        let destination = temp_destination("prepare");
+        let probe = RangeProbe { total_bytes: 12, validator: "\"stable-v1\"".to_string(), validator_is_etag: true };
+        let first = prepare_recovery("https://example.com/file.bin", "{}", &destination, &probe, 4).unwrap();
+        assert_eq!(first.1, 0);
+        let complete_part = segment_part_path(&destination, 0);
+        fs::write(&complete_part, b"abc").unwrap();
+        let resumed = prepare_recovery("https://example.com/file.bin", "{}", &destination, &probe, 4).unwrap();
+        assert_eq!(resumed.1, 1);
+        assert_eq!(resumed.0.transfer.segments[0].received_bytes, 3);
+
+        let changed_request = prepare_recovery("https://example.com/other.bin", "{}", &destination, &probe, 4).unwrap();
+        assert_eq!(changed_request.1, 0);
+        assert!(!complete_part.exists());
+
+        fs::remove_file(sidecar_path(&destination)).unwrap();
+    }
+
+    #[test]
+    fn prepare_recovery_discards_parts_when_remote_validator_changes() {
+        let destination = temp_destination("validator");
+        let original = RangeProbe { total_bytes: 12, validator: "\"stable-v1\"".to_string(), validator_is_etag: true };
+        prepare_recovery("https://example.com/file.bin", "{}", &destination, &original, 4).unwrap();
+        fs::write(segment_part_path(&destination, 0), b"abc").unwrap();
+
+        let changed = RangeProbe { total_bytes: 12, validator: "\"stable-v2\"".to_string(), validator_is_etag: true };
+        let prepared = prepare_recovery("https://example.com/file.bin", "{}", &destination, &changed, 4).unwrap();
+        assert_eq!(prepared.1, 0);
+        assert!(!segment_part_path(&destination, 0).exists());
+        fs::remove_file(sidecar_path(&destination)).unwrap();
     }
 }
