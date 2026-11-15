@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'src/utils/download_helpers.dart';
 import 'src/utils/shared_url_parser.dart';
+import 'src/media/yt_dlp_format_selection.dart';
 import 'src/storage/download_history_store.dart';
 import 'src/theme/easy_download_theme.dart';
 import 'src/media/ffmpeg_manager_card.dart';
@@ -144,6 +145,7 @@ class DownloadHomePage extends StatefulWidget {
 
 class _DownloadHomePageState extends State<DownloadHomePage> {
   final List<_LinkDraft> _links = [];
+  final Set<int> _handledSharedContentIds = {};
   String _filter = 'All';
   String _typeFilter = 'All';
   String _searchQuery = '';
@@ -235,9 +237,12 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       }
     });
     _shareIntentsChannel.setMethodCallHandler((call) async {
-      if (call.method == "sharedContentReceived") {
-        await _handleSharedContent(call.arguments as String?);
-        await _shareIntentsChannel.invokeMethod<void>("acknowledgeSharedContent");
+      if (call.method == "sharedContentReceived" && call.arguments is Map) {
+        final payload = Map<dynamic, dynamic>.from(call.arguments as Map);
+        final id = (payload['id'] as num?)?.toInt();
+        if (id != null) {
+          await _processSharedContent(id, payload['text'] as String?);
+        }
       }
     });
     unawaited(_loadInitialSharedContent());
@@ -255,14 +260,33 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<void> _loadInitialSharedContent() async {
     try {
-      final shared = await _shareIntentsChannel.invokeMethod<String>('getInitialSharedContent');
-      if (shared != null) await _handleSharedContent(shared);
+      final pending = await _shareIntentsChannel.invokeListMethod<dynamic>('getInitialSharedContent');
+      for (final item in pending ?? const []) {
+        if (item is! Map) continue;
+        final payload = Map<dynamic, dynamic>.from(item);
+        final id = (payload['id'] as num?)?.toInt();
+        if (id != null) {
+          await _processSharedContent(id, payload['text'] as String?);
+        }
+      }
     } on PlatformException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not receive shared link: ${error.message ?? error.code}')),
         );
       }
+    }
+  }
+
+  Future<void> _processSharedContent(int id, String? sharedText) async {
+    if (!_handledSharedContentIds.add(id)) return;
+    try {
+      await _handleSharedContent(sharedText);
+    } finally {
+      await _shareIntentsChannel.invokeMethod<void>(
+        'acknowledgeSharedContent',
+        {'id': id},
+      );
     }
   }
 
@@ -1959,10 +1983,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               final reported = (decoded['formats'] as List<dynamic>? ?? [])
                   .whereType<Map<String, dynamic>>()
                   .toList();
-              final available = reported.where((format) =>
-                  format['hasVideo'] == true && format['hasAudio'] == true).toList();
-              final availableAudio = reported.where((format) =>
-                  format['hasVideo'] != true && format['hasAudio'] == true).toList();
+              final available = YtDlpFormatSelection.videoWithAudio(reported);
+              final availableAudio = YtDlpFormatSelection.audioOnly(reported);
               if (available.isEmpty && availableAudio.isEmpty) {
                 throw StateError('This source did not report a directly downloadable video or audio format.');
               }
@@ -2104,9 +2126,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 FilledButton.icon(
                   onPressed: sourceInfo != null && selectedFormatId != null && !inspecting
                       ? () {
-                          final selected = formats.firstWhere(
-                            (format) => format['formatId'] == selectedFormatId,
-                          );
+                          final selected = YtDlpFormatSelection.byId(formats, selectedFormatId!)!;
                           final extension = (selected['ext'] as String? ?? 'mp4')
                               .toLowerCase()
                               .replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -2125,9 +2145,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 OutlinedButton.icon(
                   onPressed: sourceInfo != null && selectedAudioFormatId != null && !inspecting
                       ? () {
-                          final selected = audioFormats.firstWhere(
-                            (format) => format['formatId'] == selectedAudioFormatId,
-                          );
+                          final selected = YtDlpFormatSelection.byId(audioFormats, selectedAudioFormatId!)!;
                           final extension = (selected['ext'] as String? ?? 'm4a')
                               .toLowerCase()
                               .replaceAll(RegExp(r'[^a-z0-9]'), '');

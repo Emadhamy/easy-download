@@ -20,7 +20,7 @@ class MainActivity : FlutterActivity() {
     private val ytDlpAndroidChannel = "com.easydownload/ytdlp_android"
     private val shareIntentsChannel = "com.easydownload/share_intents"
     private var shareMethodChannel: MethodChannel? = null
-    private var pendingSharedContent: String? = null
+    private val pendingSharedContent = PendingSharedContentQueue()
     private val pickDirectoryRequestCode = 9401
     private var pendingDirectoryResult: MethodChannel.Result? = null
     private val ytDlpExecutor = Executors.newSingleThreadExecutor()
@@ -37,11 +37,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun captureSharedIntent(intent: Intent?) {
-        if (intent == null || intent.action != Intent.ACTION_SEND) return
-        val shared = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
-        if (shared.isNullOrEmpty()) return
-        pendingSharedContent = shared
-        shareMethodChannel?.invokeMethod("sharedContentReceived", shared)
+        if (intent == null) return
+        val payload = pendingSharedContent.capture(
+            action = intent.action,
+            text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+        ) ?: return
+        shareMethodChannel?.invokeMethod("sharedContentReceived", payload.toChannelMap())
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -50,12 +51,16 @@ class MainActivity : FlutterActivity() {
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getInitialSharedContent" -> {
-                        result.success(pendingSharedContent)
-                        pendingSharedContent = null
+                        result.success(pendingSharedContent.snapshot().map { it.toChannelMap() })
                     }
                     "acknowledgeSharedContent" -> {
-                        pendingSharedContent = null
-                        result.success(null)
+                        val id = call.argument<Number>("id")?.toLong()
+                        if (id == null) {
+                            result.error("INVALID_ARGUMENT", "A shared-content ID is required.", null)
+                        } else {
+                            pendingSharedContent.acknowledge(id)
+                            result.success(null)
+                        }
                     }
                     else -> result.notImplemented()
                 }
