@@ -654,8 +654,6 @@ mod tests {
     #[test]
     fn extracts_and_verifies_linux_tar_xz_fixture() {
         use super::{extract_tar_xz, set_executable_permissions, verify_ffmpeg};
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
