@@ -90,7 +90,7 @@ pub fn save_atomic(path: &Path, manifest: &RecoveryManifest) -> Result<(), Strin
         drop(file);
         atomic_replace(&temporary, path)
             .map_err(|error| format!("Could not atomically replace recovery sidecar: {error}"))?;
-        sync_parent(parent)?;
+        sync_parent(parent).map_err(|error| format!("Could not sync recovery sidecar directory: {error}"))?;
         Ok(())
     })();
     if result.is_err() {
