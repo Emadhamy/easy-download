@@ -650,6 +650,93 @@ mod tests {
             .unwrap_err().contains("SHA-256"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn extracts_and_verifies_linux_tar_xz_fixture() {
+        use super::{extract_tar_xz, set_executable_permissions, verify_ffmpeg};
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-tar-fixture-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let source = fake_ffmpeg(&directory, true);
+        let executable_bytes = std::fs::read(&source).unwrap();
+        let archive_path = directory.join("fixture.tar.xz");
+        let archive_file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = xz2::write::XzEncoder::new(archive_file, 6);
+        let mut archive = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(executable_bytes.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        archive.append_data(&mut header, "package/bin/ffmpeg", executable_bytes.as_slice()).unwrap();
+        let encoder = archive.into_inner().unwrap();
+        encoder.finish().unwrap();
+
+        let extracted = directory.join("extracted-ffmpeg");
+        extract_tar_xz(&archive_path, &extracted, "ffmpeg").unwrap();
+        set_executable_permissions(&extracted).unwrap();
+        assert_eq!(verify_ffmpeg(&extracted).unwrap(), "ffmpeg version test-build");
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_restores_previous_verified_ffmpeg_without_losing_current() {
+        use super::{hash_file, rollback, write_json_atomically, ActiveFfmpeg};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-rollback-{}-{nonce}", std::process::id()
+        ));
+        let versions = root.join("versions");
+        let old_dir = versions.join("old-build");
+        let new_dir = versions.join("new-build");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+
+        let old_source = fake_ffmpeg(&root, true);
+        let old_binary = old_dir.join("ffmpeg");
+        std::fs::copy(&old_source, &old_binary).unwrap();
+        super::set_executable_permissions(&old_binary).unwrap();
+
+        let new_source = fake_ffmpeg(&root, true);
+        let new_binary = new_dir.join("ffmpeg");
+        std::fs::copy(&new_source, &new_binary).unwrap();
+        super::set_executable_permissions(&new_binary).unwrap();
+
+        let current = ActiveFfmpeg {
+            version: "new-build".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            executable_path: "versions/new-build/ffmpeg".to_string(),
+            sha256: hash_file(&new_binary).unwrap(),
+            encoder: "libmp3lame".to_string(),
+        };
+        let previous = ActiveFfmpeg {
+            version: "old-build".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            executable_path: "versions/old-build/ffmpeg".to_string(),
+            sha256: hash_file(&old_binary).unwrap(),
+            encoder: "libmp3lame".to_string(),
+        };
+        write_json_atomically(&root.join("active.json"), &current).unwrap();
+        write_json_atomically(&root.join("previous.json"), &previous).unwrap();
+
+        let restored = rollback(&root).unwrap();
+        assert_eq!(restored, previous);
+        assert_eq!(super::read_pointer(&root.join("active.json")).unwrap(), previous);
+        assert_eq!(super::read_pointer(&root.join("previous.json")).unwrap(), current);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn validates_exact_candidate_asset_and_release_url() {
         let candidate = LatestFfmpegRelease {
