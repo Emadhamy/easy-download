@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `control_for`, `controls`, `has_existing_partial_download`, `request_headers_are_empty`
+// These functions are ignored because they are not marked as `pub`: `control_for`, `controls`, `has_existing_partial_download`, `has_existing_segmented_state`, `has_existing_single_connection_partial`, `request_headers_are_empty`
 
 /// Starts a controlled download. Keep task_id and use the command functions below.
 Stream<String> downloadFileControlled({
@@ -54,10 +54,9 @@ Stream<String> downloadFileResumableControlledWithHeaders({
   destinationPath: destinationPath,
 );
 
-/// Uses parallel byte ranges for eligible large direct downloads, and safely
-/// falls back to the existing resumable single-connection path otherwise.
-/// Segmented transfers are intentionally not yet crash-resumable; any existing
-/// partial state therefore stays on the single-connection resume path.
+/// Uses parallel byte ranges for eligible large direct downloads. Completed
+/// segments are retained across process restarts only when the request
+/// fingerprint and the current remote validator still match.
 Stream<String> downloadFileResumableControlledWithHeadersAndSegments({
   required String taskId,
   required String inputUrl,
