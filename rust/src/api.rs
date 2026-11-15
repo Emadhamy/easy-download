@@ -316,6 +316,7 @@ mod segmented_api_tests {
 
         assert!(has_existing_partial_download(&destination));
 
+        fs::remove_file(&stale_part).expect("remove stale segment fixture");
         fs::remove_dir_all(directory).expect("clean test directory");
     }
 
