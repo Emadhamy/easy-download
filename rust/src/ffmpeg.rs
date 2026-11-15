@@ -370,4 +370,80 @@ exit 0
             .collect();
         assert!(leftovers.is_empty(), "failed conversions must clean staged MP3 files");
     }
+
+
+    /// Exercises the real FFmpeg binary. Run explicitly in CI with FFmpeg/ffprobe installed.
+    #[test]
+    #[ignore = "requires real FFmpeg and ffprobe binaries"]
+    fn real_ffmpeg_conversion_produces_valid_mp3() {
+        use super::get_version;
+        use std::process::Command;
+
+        let directory = TestDirectory::new();
+        let ffmpeg = std::env::var_os("FFMPEG_BIN").unwrap_or_else(|| "ffmpeg".into());
+        let ffprobe = std::env::var_os("FFPROBE_BIN").unwrap_or_else(|| "ffprobe".into());
+        let input = directory.path().join("real-source.mp4");
+        let output = directory.path().join("real-converted.mp3");
+
+        let version = get_version(&ffmpeg).expect("real FFmpeg version probe must succeed");
+        assert!(version.starts_with("ffmpeg version "));
+
+        let encoders = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .expect("FFmpeg encoder list must be available");
+        assert!(encoders.status.success());
+        let encoder_text = format!(
+            "{}\\n{}",
+            String::from_utf8_lossy(&encoders.stdout),
+            String::from_utf8_lossy(&encoders.stderr)
+        );
+        assert!(
+            encoder_text.contains("libmp3lame"),
+            "CI FFmpeg must include the libmp3lame encoder"
+        );
+
+        let fixture = Command::new(&ffmpeg)
+            .args([
+                "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=160x120:r=10:d=1",
+                "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+                "-shortest", "-c:v", "mpeg4", "-c:a", "aac",
+            ])
+            .arg(&input)
+            .status()
+            .expect("FFmpeg must generate the short video fixture");
+        assert!(fixture.success(), "FFmpeg fixture generation failed");
+
+        let mut progress = Vec::new();
+        convert_to_mp3(&ffmpeg, &input, &output, "128k", |elapsed, total| {
+            progress.push((elapsed, total));
+        })
+        .expect("real video-to-MP3 conversion must succeed");
+
+        assert!(output.metadata().unwrap().len() > 0);
+        assert!(!progress.is_empty(), "real conversion must report progress");
+        assert!(
+            progress.iter().any(|(_, total)| total.is_some()),
+            "real conversion should report the probed input duration"
+        );
+
+        let probe = Command::new(&ffprobe)
+            .args([
+                "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(&output)
+            .output()
+            .expect("ffprobe must inspect the converted MP3");
+        assert!(probe.status.success(), "ffprobe rejected the MP3 output");
+        assert_eq!(
+            String::from_utf8_lossy(&probe.stdout).trim(),
+            "mp3",
+            "converted output must contain an MP3 audio stream"
+        );
+    }
+
 }
