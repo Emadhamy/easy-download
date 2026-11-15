@@ -772,10 +772,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn installs_verified_release_end_to_end_and_keeps_previous_for_rollback() {
-        use super::{active_installation, hash_file, install_release_with_downloader, rollback, ActiveFfmpeg};
+        use super::{active_installation, hash_file, install_release_with_downloader, rollback};
         use crate::ffmpeg_updates::LatestFfmpegRelease;
         use sha2::{Digest, Sha256};
-        use std::io::Write;
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -787,7 +786,13 @@ mod tests {
         let make_archive = |version: &str| {
             let source = root.join(format!("fake-ffmpeg-{version}"));
             let script = format!(
-                "#!/bin/sh\\ncase \\"$*\\" in\\n  *-version*) echo 'ffmpeg version {version}'; exit 0 ;;\\n  *-encoders*) printf '%s\\n' ' V....D libmp3lame MP3 encoder'; exit 0 ;;\\nesac\\nexit 2\\n"
+                r#"#!/bin/sh
+case "$*" in
+  *-version*) echo 'ffmpeg version {version}'; exit 0 ;;
+  *-encoders*) printf '%s\n' ' V....D libmp3lame MP3 encoder'; exit 0 ;;
+esac
+exit 2
+"#
             );
             std::fs::write(&source, script).unwrap();
             use std::os::unix::fs::PermissionsExt;
