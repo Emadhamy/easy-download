@@ -384,7 +384,10 @@ exit 0
 
         let error = convert_to_mp3(&executable, &input, &output, "128k", |_, _| {}).unwrap_err();
 
-        assert!(error.contains("synthetic conversion failure"));
+        assert!(
+            error.starts_with("FFmpeg conversion failed:"),
+            "expected FFmpeg process failure, got: {error}"
+        );
         assert!(!output.exists());
         let leftovers: Vec<_> = std::fs::read_dir(directory.path()).unwrap()
             .filter_map(Result::ok)
