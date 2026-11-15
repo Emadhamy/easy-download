@@ -1,4 +1,4 @@
-package com.easydownload
+package com.easydownload.app
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
