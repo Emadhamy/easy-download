@@ -593,6 +593,63 @@ mod tests {
         assert!(safe_version_component("").is_err());
     }
 
+    #[cfg(unix)]
+    fn fake_ffmpeg(directory: &Path, has_mp3_encoder: bool) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let executable = directory.join(if has_mp3_encoder { "ffmpeg-with-mp3" } else { "ffmpeg-without-mp3" });
+        let encoders = if has_mp3_encoder {
+            " V....D libmp3lame           libmp3lame MP3 (MPEG audio layer 3)\n"
+        } else {
+            " V..... aac                  AAC (Advanced Audio Coding)\n"
+        };
+        let script = format!(
+            "#!/bin/sh\ncase \"$*\" in\n  *-version*) echo 'ffmpeg version test-build'; exit 0 ;;\n  *-encoders*) printf '%s' '{}' ; exit 0 ;;\nesac\nexit 2\n",
+            encoders.replace('\\', "\\\\").replace('\'', "'\\''").replace('\n', "\\n")
+        );
+        std::fs::write(&executable, script).unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        executable
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accepts_ffmpeg_only_when_version_and_libmp3lame_are_verified() {
+        use super::verify_ffmpeg;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "easy-download-ffmpeg-probe-{}-{nonce}", std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let supported = fake_ffmpeg(&directory, true);
+        assert_eq!(verify_ffmpeg(&supported).unwrap(), "ffmpeg version test-build");
+
+        let unsupported = fake_ffmpeg(&directory, false);
+        let error = verify_ffmpeg(&unsupported).unwrap_err();
+        assert!(error.contains("libmp3lame"));
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_malformed_publisher_sha256_before_installation() {
+        let candidate = LatestFfmpegRelease {
+            version: "build-2026-11-11".to_string(),
+            asset_name: "ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            download_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz".to_string(),
+            sha256: "not-a-sha256".to_string(),
+            release_page: "https://github.com/BtbN/FFmpeg-Builds/releases/tag/latest".to_string(),
+            published_at: "2026-11-11T12:39:00Z".to_string(),
+        };
+        assert!(validate_candidate(&candidate, "linux-x86_64")
+            .unwrap_err().contains("SHA-256"));
+    }
+
     #[test]
     fn validates_exact_candidate_asset_and_release_url() {
         let candidate = LatestFfmpegRelease {
