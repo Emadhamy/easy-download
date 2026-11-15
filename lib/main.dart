@@ -10,7 +10,6 @@ import 'src/utils/download_helpers.dart';
 import 'src/utils/shared_url_parser.dart';
 import 'src/storage/download_history_store.dart';
 import 'src/theme/easy_download_theme.dart';
-import 'src/media/ffmpeg_manager_config.dart';
 import 'src/media/ffmpeg_manager_card.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
