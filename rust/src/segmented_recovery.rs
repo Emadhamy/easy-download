@@ -181,7 +181,7 @@ mod tests {
     fn sample() -> RecoveryManifest {
         let transfer = SegmentManifest::new(&RangeProbe {
             total_bytes: 12,
-            validator: "\\"stable-v1\\"".to_string(),
+            validator: "\"stable-v1\"".to_string(),
             validator_is_etag: true,
         }, 4).unwrap();
         RecoveryManifest::new("https://example.com/file.bin?token=secret", "{}", transfer).unwrap()
