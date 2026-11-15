@@ -10,6 +10,7 @@ import 'src/utils/download_helpers.dart';
 import 'src/utils/shared_url_parser.dart';
 import 'src/storage/download_history_store.dart';
 import 'src/theme/easy_download_theme.dart';
+import 'src/media/ffmpeg_manager_config.dart';
 import 'src/rust/api.dart' as rust_api;
 import 'src/rust/frb_generated.dart' show RustLib;
 
@@ -1118,7 +1119,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              items: const ['128k', '160k', '192k', '256k', '320k']
+              items: ffmpegMp3Bitrates
                   .map((rate) => DropdownMenuItem(value: rate, child: Text(rate)))
                   .toList(),
               onChanged: supported && !_ffmpegConverting
