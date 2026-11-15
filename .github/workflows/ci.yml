@@ -130,6 +130,10 @@ jobs:
       - name: Build Android APK
         run: flutter build apk --debug --target-platform android-arm64
 
+      - name: Run Android native unit tests
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest
+
       - name: Install NDK r28 and Android build tools for native audit
         shell: bash
         run: |
