@@ -75,14 +75,26 @@ pub fn save_atomic(path: &Path, manifest: &RecoveryManifest) -> Result<(), Strin
     if !parent.is_dir() {
         return Err("Recovery sidecar parent directory does not exist".to_string());
     }
-    let mut temporary_name = path.as_os_str().to_os_string();
-    temporary_name.push(format!(".tmp-{}", std::process::id()));
-    let temporary = PathBuf::from(temporary_name);
+    let encoded = serde_json::to_vec(manifest)
+        .map_err(|error| format!("Could not encode recovery sidecar: {error}"))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("System clock is before the Unix epoch: {error}"))?
+        .as_nanos();
+    let (temporary, mut file) = (0_u8..16)
+        .find_map(|attempt| {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(format!(".tmp-{}-{nonce}-{attempt}", std::process::id()));
+            let candidate = PathBuf::from(name);
+            match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+                Ok(file) => Some(Ok((candidate, file))),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .ok_or_else(|| "Could not allocate a unique recovery sidecar staging file".to_string())?
+        .map_err(|error| format!("Could not create recovery sidecar staging file: {error}"))?;
     let result = (|| {
-        let encoded = serde_json::to_vec(manifest)
-            .map_err(|error| format!("Could not encode recovery sidecar: {error}"))?;
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)
-            .map_err(|error| format!("Could not create recovery sidecar staging file: {error}"))?;
         file.write_all(&encoded)
             .and_then(|_| file.flush())
             .and_then(|_| file.sync_all())
@@ -205,6 +217,28 @@ pub fn prepare_recovery(
         let transfer = SegmentManifest::new(probe, segment_count)?;
         RecoveryManifest::new(input_url, request_headers_json, transfer)?
     };
+
+    remove_stale_worker_temps(destination)?;
+
+/// Removes abandoned worker staging files left by a process crash. Symlinks
+/// are unlinked rather than followed; unexpected directories fail safely.
+fn remove_stale_worker_temps(destination: &Path) -> Result<(), String> {
+    for index in 0..crate::segmented::USER_MAX_SEGMENT_COUNT {
+        let mut name = segment_part_path(destination, index).as_os_str().to_os_string();
+        name.push(".easy-download.tmp");
+        let temporary = PathBuf::from(name);
+        match fs::symlink_metadata(&temporary) {
+            Ok(_) => fs::remove_file(&temporary).map_err(|error| {
+                format!("Could not remove abandoned segment staging file {index}: {error}")
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Could not inspect abandoned segment staging file {index}: {error}")),
+        }
+    }
+    Ok(())
+}
+
+    remove_stale_worker_temps(destination)?;
 
     let mut assembly_name = destination.as_os_str().to_os_string();
     assembly_name.push(".easy-download.assembling");
@@ -342,6 +376,32 @@ mod tests {
         assert_eq!(changed_request.1, 0);
         assert!(!complete_part.exists());
 
+        fs::remove_file(sidecar_path(&destination)).unwrap();
+    }
+
+    #[test]
+    fn prepare_recovery_removes_abandoned_worker_temps_and_keeps_complete_parts() {
+        let destination = temp_destination("worker-temp");
+        let probe = RangeProbe {
+            total_bytes: 12,
+            validator: "\\"stable-v1\\"".to_string(),
+            validator_is_etag: true,
+        };
+        prepare_recovery("https://example.com/file.bin", "{}", &destination, &probe, 4).unwrap();
+
+        let complete_part = segment_part_path(&destination, 0);
+        fs::write(&complete_part, b"abc").unwrap();
+        let mut temporary_name = segment_part_path(&destination, 1).as_os_str().to_os_string();
+        temporary_name.push(".easy-download.tmp");
+        let abandoned_temp = PathBuf::from(temporary_name);
+        fs::write(&abandoned_temp, b"interrupted").unwrap();
+
+        let prepared = prepare_recovery("https://example.com/file.bin", "{}", &destination, &probe, 4).unwrap();
+        assert_eq!(prepared.1, 1);
+        assert!(complete_part.exists());
+        assert!(!abandoned_temp.exists());
+
+        fs::remove_file(complete_part).unwrap();
         fs::remove_file(sidecar_path(&destination)).unwrap();
     }
 
