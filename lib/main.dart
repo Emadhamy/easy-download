@@ -441,13 +441,34 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<void> _processSharedContent(int id, String? sharedText) async {
     if (!_handledSharedContentIds.add(id)) return;
+    var processed = false;
     try {
       await _handleSharedContent(sharedText);
+      processed = true;
+    } catch (error) {
+      // Keep the native share queued when initialization or inspection fails.
+      // It can be retried on the next app launch instead of being silently lost.
+      _handledSharedContentIds.remove(id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not process the shared video: ${error.toString().replaceFirst('Bad state: ', '')}'),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } finally {
-      await _shareIntentsChannel.invokeMethod<void>(
-        'acknowledgeSharedContent',
-        {'id': id},
-      );
+      if (processed) {
+        try {
+          await _shareIntentsChannel.invokeMethod<void>(
+            'acknowledgeSharedContent',
+            {'id': id},
+          );
+        } on PlatformException {
+          // The item remains in the native queue and will be deduplicated
+          // by the in-memory ID set during this app session.
+        }
+      }
     }
   }
 
@@ -461,8 +482,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       return;
     }
     if (Platform.isAndroid && _ytDlpInstalledVersion == null) {
-      await _ytDlpInitialization;
+      final initialization = _ytDlpInitialization;
+      if (initialization != null) await initialization;
       if (!mounted) return;
+      if (_ytDlpInstalledVersion == null) {
+        throw StateError(
+          'yt-dlp is not ready yet. The shared video was kept so it is not lost; open the tools page, verify yt-dlp, then retry.',
+        );
+      }
     }
     await _addVideoLink(initialUrl: uri.toString());
   }
