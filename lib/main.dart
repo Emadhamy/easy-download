@@ -17,12 +17,50 @@ import 'src/rust/frb_generated.dart' show RustLib;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init();
   runApp(const EasyDownloadApp());
 }
 
-class EasyDownloadApp extends StatelessWidget {
-  const EasyDownloadApp({super.key});
+/// Boots the Flutter interface before loading the native Rust library.
+///
+/// A failed or stalled native initialization must never leave Android showing
+/// an unexplained white screen. The startup state below exposes the real error
+/// and lets the user retry without reinstalling the application.
+class EasyDownloadApp extends StatefulWidget {
+  const EasyDownloadApp({
+    super.key,
+    this.initializeRust,
+  });
+
+  @visibleForTesting
+  final Future<void> Function()? initializeRust;
+
+  @override
+  State<EasyDownloadApp> createState() => _EasyDownloadAppState();
+}
+
+class _EasyDownloadAppState extends State<EasyDownloadApp> {
+  late Future<void> _rustInitialization;
+
+  @override
+  void initState() {
+    super.initState();
+    _rustInitialization = _initializeRust();
+  }
+
+  Future<void> _initializeRust() async {
+    final testInitializer = widget.initializeRust;
+    if (testInitializer != null) {
+      await testInitializer().timeout(const Duration(seconds: 30));
+      return;
+    }
+    await RustLib.init().timeout(const Duration(seconds: 30));
+  }
+
+  void _retryRustInitialization() {
+    setState(() {
+      _rustInitialization = _initializeRust();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +68,130 @@ class EasyDownloadApp extends StatelessWidget {
       title: 'Easy Download',
       debugShowCheckedModeBanner: false,
       theme: EasyDownloadTheme.dark,
-      home: const DownloadHomePage(),
+      home: FutureBuilder<void>(
+        future: _rustInitialization,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const _EngineStartupScreen();
+          }
+          if (snapshot.hasError) {
+            return _EngineStartupErrorScreen(
+              error: snapshot.error!,
+              onRetry: _retryRustInitialization,
+            );
+          }
+          return const DownloadHomePage();
+        },
+      ),
+    );
+  }
+}
+
+class _EngineStartupScreen extends StatelessWidget {
+  const _EngineStartupScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.download_rounded,
+                size: 64,
+                color: EasyDownloadPalette.accent,
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Easy Download',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 12),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text(
+                'Preparing the download engine...',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: EasyDownloadPalette.muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EngineStartupErrorScreen extends StatelessWidget {
+  const _EngineStartupErrorScreen({
+    required this.error,
+    required this.onRetry,
+  });
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 64,
+                  color: EasyDownloadPalette.danger,
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Easy Download could not start',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'The native download engine did not initialize. The app stopped here to avoid showing a blank screen.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: EasyDownloadPalette.muted,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: EasyDownloadPalette.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: EasyDownloadPalette.border),
+                  ),
+                  child: SelectableText(
+                    error.toString(),
+                    style: const TextStyle(
+                      color: EasyDownloadPalette.foreground,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Retry engine startup'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

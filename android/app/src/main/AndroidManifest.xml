@@ -3,6 +3,8 @@
     <application
         android:label="Easy Download"
         android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
     >
         <activity
             android:name=".MainActivity"
