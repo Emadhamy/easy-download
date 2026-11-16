@@ -156,6 +156,15 @@ jobs:
             --readelf "$ANDROID_NDK_AUDIT_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
             --zipalign "$ANDROID_BUILD_TOOLS/zipalign"
 
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-download-android-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+
 
   windows-rust-check:
     name: Windows native Rust tests
