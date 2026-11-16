@@ -292,18 +292,22 @@ mod segmented_api_tests {
     use super::{has_existing_partial_download, request_headers_are_empty};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEST_DIRECTORY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn test_directory() -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after Unix epoch")
             .as_nanos();
+        let counter = TEST_DIRECTORY_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "easy-download-segment-api-{}-{nonce}",
+            "easy-download-segment-api-{}-{nonce}-{counter}",
             std::process::id()
         ));
-        fs::create_dir_all(&path).expect("create test directory");
+        fs::create_dir(&path).expect("create unique test directory");
         path
     }
 
