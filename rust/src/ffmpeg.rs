@@ -168,8 +168,33 @@ where F: FnMut(u64, Option<u64>) {
     let input = validate_input(input_path.as_ref())?;
     let output = validate_output(output_path.as_ref(), &input)?;
 
-    let probe = Command::new(executable).args(["-hide_banner", "-i"]).arg(&input).output()
-        .map_err(|error| format!("Could not probe input video: {error}"))?;
+    // A freshly installed executable can briefly return ETXTBSY on Linux
+    // while the filesystem releases the staged file. Retry only this transient
+    // spawn error; do not mask missing binaries or other launch failures.
+    let mut probe = None;
+    for attempt in 0..5 {
+        match Command::new(executable)
+            .args(["-hide_banner", "-i"])
+            .arg(&input)
+            .output()
+        {
+            Ok(result) => {
+                probe = Some(result);
+                break;
+            }
+            Err(error)
+                if cfg!(target_os = "linux")
+                    && error.raw_os_error() == Some(26)
+                    && attempt < 4 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10 * (attempt + 1)));
+            }
+            Err(error) => return Err(format!("Could not probe input video: {error}")),
+        }
+    }
+    let probe = probe.ok_or_else(|| {
+        "Could not probe input video after retrying a transient busy executable".to_string()
+    })?;
     let probe_text = format!("{}\n{}", String::from_utf8_lossy(&probe.stdout), String::from_utf8_lossy(&probe.stderr));
     let duration = parse_duration_millis(&probe_text);
 
