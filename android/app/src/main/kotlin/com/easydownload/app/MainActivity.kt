@@ -1,7 +1,11 @@
 package com.easydownload.app
 
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import com.yausername.youtubedl_android.YoutubeDL
@@ -28,6 +32,85 @@ class MainActivity : FlutterActivity() {
     // The bundled yt-dlp binary is present immediately after init(), but the
     // library's versionName()/version() only read metadata written by its updater.
     // Run the embedded binary itself so a fresh install is correctly recognized.
+    private fun copyFileToDefaultDownloads(sourcePath: String, fileName: String): String {
+        val source = File(sourcePath)
+        if (!source.isFile || source.length() <= 0L) {
+            throw IllegalStateException("The completed download file is missing or empty.")
+        }
+
+        // Android 10+ lets the app publish files into the public Downloads
+        // collection without requesting broad storage permissions.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val relativePath = Environment.DIRECTORY_DOWNLOADS + "/Easy Download/"
+            val extension = fileName.substringAfterLast('.', "")
+            val mimeType = MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(extension.lowercase()) ?: "application/octet-stream"
+            val dot = fileName.lastIndexOf('.')
+            val baseName = if (dot > 0) fileName.substring(0, dot) else fileName
+            val suffix = if (dot > 0) fileName.substring(dot) else ""
+            var candidate = fileName
+            var index = 1
+            val projection = arrayOf(MediaStore.MediaColumns._ID)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?"
+            while (contentResolver.query(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    arrayOf(candidate, relativePath),
+                    null
+                )?.use { it.moveToFirst() } == true
+            ) {
+                candidate = "$baseName ($index)$suffix"
+                index++
+            }
+
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, candidate)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val destination = contentResolver.insert(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                values
+            ) ?: throw IllegalStateException("Android could not create the file in Downloads/Easy Download.")
+            try {
+                val output = contentResolver.openOutputStream(destination, "w")
+                    ?: throw IllegalStateException("Android could not open the destination file.")
+                source.inputStream().use { input -> output.use { input.copyTo(it) } }
+                val published = ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }
+                contentResolver.update(destination, published, null, null)
+                return destination.toString()
+            } catch (error: Exception) {
+                contentResolver.delete(destination, null, null)
+                throw error
+            }
+        }
+
+        // Older Android versions use app-specific external Downloads storage;
+        // this avoids asking users for broad legacy storage permissions.
+        val legacyDirectory = File(
+            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir,
+            "Easy Download"
+        )
+        if (!legacyDirectory.exists() && !legacyDirectory.mkdirs()) {
+            throw IllegalStateException("Could not create the download folder.")
+        }
+        var destination = File(legacyDirectory, fileName)
+        var index = 1
+        val dot = fileName.lastIndexOf('.')
+        val baseName = if (dot > 0) fileName.substring(0, dot) else fileName
+        val suffix = if (dot > 0) fileName.substring(dot) else ""
+        while (destination.exists()) {
+            destination = File(legacyDirectory, "$baseName ($index)$suffix")
+            index++
+        }
+        source.copyTo(destination)
+        return destination.absolutePath
+    }
+
     private fun installedYtDlpVersion(): String {
         val request = YoutubeDLRequest(emptyList()).apply {
             addCommands(listOf("--version"))
@@ -83,6 +166,19 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, storageChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "copyFileToDefaultDownloads" -> {
+                        val sourcePath = call.argument<String>("sourcePath")
+                        val fileName = call.argument<String>("fileName")
+                        if (sourcePath.isNullOrBlank() || fileName.isNullOrBlank()) {
+                            result.error("INVALID_ARGUMENT", "Source file and file name are required.", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            result.success(copyFileToDefaultDownloads(sourcePath, fileName))
+                        } catch (error: Exception) {
+                            result.error("DEFAULT_DOWNLOAD_SAVE_FAILED", error.message, null)
+                        }
+                    }
                     "pickDownloadDirectory" -> {
                         if (pendingDirectoryResult != null) {
                             result.error("PICK_IN_PROGRESS", "A folder picker is already open.", null)

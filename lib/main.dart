@@ -1838,7 +1838,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         candidateName = destination.split(Platform.pathSeparator).last;
         if (await File(destination).exists()) {
           var completedLocation = destination;
-          if (Platform.isAndroid && _androidDownloadTreeUri != null) {
+          if (Platform.isAndroid) {
             completedLocation = await _copyToAndroidDownloadDirectory(destination, candidateName);
             try { await File(destination).delete(); } catch (_) {}
           }
@@ -1948,7 +1948,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         }
       }
       var completedLocation = destination;
-      if (Platform.isAndroid && _androidDownloadTreeUri != null) {
+      if (Platform.isAndroid) {
         completedLocation = await _copyToAndroidDownloadDirectory(destination, candidateName);
         try { await File(destination).delete(); } catch (_) {}
       }
@@ -3139,8 +3139,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               children: [
                 Text(Platform.isAndroid
                     ? (_androidDownloadTreeUri == null
-                        ? 'Downloads are saved in Easy Download app storage. Choose a folder to save completed downloads there. Downloads are staged privately while in progress, then copied to your chosen folder.'
-                        : 'A folder has been selected for completed downloads. In-progress files remain in private app storage so pause and resume continue to work.')
+                        ? 'Default folder: Downloads/Easy Download. Choose another folder whenever you want. Files are staged privately while downloading, then saved to the default folder.'
+                        : 'Custom download folder selected. New completed downloads will be saved there; in-progress files remain private until completion.')
                     : 'Download folder:\n${_downloadDirectoryPath ?? 'App documents folder (default)'}'),
                 const SizedBox(height: 20),
                 const Text(
@@ -3199,11 +3199,15 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
 
   Future<String> _copyToAndroidDownloadDirectory(String sourcePath, String fileName) async {
     final treeUri = _androidDownloadTreeUri;
-    if (treeUri == null) return sourcePath;
-    final savedUri = await _storageChannel.invokeMethod<String>(
-      'copyFileToDownloadDirectory',
-      {'treeUri': treeUri, 'sourcePath': sourcePath, 'fileName': fileName},
-    );
+    final savedUri = treeUri == null
+        ? await _storageChannel.invokeMethod<String>(
+            'copyFileToDefaultDownloads',
+            {'sourcePath': sourcePath, 'fileName': fileName},
+          )
+        : await _storageChannel.invokeMethod<String>(
+            'copyFileToDownloadDirectory',
+            {'treeUri': treeUri, 'sourcePath': sourcePath, 'fileName': fileName},
+          );
     if (savedUri == null || savedUri.isEmpty) {
       throw StateError('Android did not return the saved file location.');
     }
