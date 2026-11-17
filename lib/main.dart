@@ -307,6 +307,7 @@ class DownloadHomePage extends StatefulWidget {
 class _DownloadHomePageState extends State<DownloadHomePage> {
   final List<_LinkDraft> _links = [];
   final Set<int> _handledSharedContentIds = {};
+  Future<void> _sharedContentProcessing = Future<void>.value();
   String _filter = 'All';
   String _typeFilter = 'All';
   String _searchQuery = '';
@@ -402,7 +403,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         final payload = Map<dynamic, dynamic>.from(call.arguments as Map);
         final id = (payload['id'] as num?)?.toInt();
         if (id != null) {
-          await _processSharedContent(id, payload['text'] as String?);
+          await _enqueueSharedContent(id, payload['text'] as String?);
         }
       }
     });
@@ -427,7 +428,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         final payload = Map<dynamic, dynamic>.from(item);
         final id = (payload['id'] as num?)?.toInt();
         if (id != null) {
-          await _processSharedContent(id, payload['text'] as String?);
+          await _enqueueSharedContent(id, payload['text'] as String?);
         }
       }
     } on PlatformException catch (error) {
@@ -437,6 +438,15 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
         );
       }
     }
+  }
+
+  Future<void> _enqueueSharedContent(int id, String? sharedText) {
+    // Each incoming Android share may open a quality dialog. Serialize them so
+    // rapid consecutive shares never stack dialogs or race the same screen.
+    _sharedContentProcessing = _sharedContentProcessing.then(
+      (_) => _processSharedContent(id, sharedText),
+    );
+    return _sharedContentProcessing;
   }
 
   Future<void> _processSharedContent(int id, String? sharedText) async {
