@@ -448,10 +448,18 @@ class MainActivity : FlutterActivity() {
         try {
             val flags = data.flags and
                 (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            if ((flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION) == 0) {
+                throw IllegalStateException("Android did not grant write access to the selected folder.")
+            }
             contentResolver.takePersistableUriPermission(uri, flags)
+            val directory = DocumentFile.fromTreeUri(this, uri)
+                ?: throw IllegalStateException("Android could not reopen the selected folder.")
+            if (!directory.canWrite()) {
+                throw IllegalStateException("The selected folder is not writable. Choose a folder where files can be created.")
+            }
             callback.success(uri.toString())
         } catch (error: Exception) {
-            callback.error("PERMISSION_FAILED", error.message, null)
+            callback.error("PERMISSION_FAILED", error.message ?: "Could not keep write access to the selected folder.", null)
         }
     }
 

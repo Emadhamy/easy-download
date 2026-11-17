@@ -1964,7 +1964,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Download saved: $candidateName')),
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         link.isDownloading = false;
@@ -1974,8 +1974,14 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
       });
       await _saveHistory();
       if (!link.isCancelled) {
+        final details = error is PlatformException
+            ? '${error.code}: ${error.message ?? error.details ?? 'Unknown Android storage error'}'
+            : error.toString();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Download interrupted. Retry to continue from the saved partial file.')),
+          SnackBar(
+            content: Text('Download/save failed: $details'),
+            duration: const Duration(seconds: 8),
+          ),
         );
       }
     } finally {
