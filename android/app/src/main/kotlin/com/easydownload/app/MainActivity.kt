@@ -313,12 +313,19 @@ class MainActivity : FlutterActivity() {
                                 "${requestedOutput.nameWithoutExtension}.%(ext)s"
                             ).absolutePath
                             YoutubeDL.getInstance().init(applicationContext)
+                            // Snapshot the directory before downloading so we can safely resolve the
+                            // final media file even if yt-dlp's stdout marker is stale or unavailable.
+                            val filesBefore = outputDirectory.listFiles()
+                                ?.filter { it.isFile }
+                                ?.associate { it.canonicalPath to (it.length() to it.lastModified()) }
+                                ?: emptyMap()
                             val request = YoutubeDLRequest(sourceUrl).apply {
                                 addOption("-f", formatId)
                                 addOption("-o", outputTemplate)
                                 addOption("--no-playlist")
                                 addOption("--no-part")
                                 addOption("--no-mtime")
+                                addOption("--no-simulate")
                                 addOption("--newline")
                                 addOption("--print", "after_move:ED_FILE:%(filepath)s")
                             }
@@ -343,13 +350,52 @@ class MainActivity : FlutterActivity() {
                                         ?.takeIf { it.isNotEmpty() }
                                 }
                                 .lastOrNull()
-                                ?: throw IllegalStateException("yt-dlp completed without reporting the output file.")
-                            val output = File(reportedPath).canonicalFile
+                            val reportedOutput = reportedPath?.let { File(it).canonicalFile }
+                            val reportedOutputIsValid = reportedOutput?.let {
+                                it.path.startsWith(appRoot.path + File.separator) &&
+                                    it.isFile && it.length() > 0L
+                            } == true
+                            val mediaExtensions = setOf(
+                                "3gp", "aac", "avi", "flac", "flv", "m4a", "m4v",
+                                "mkv", "mov", "mp3", "mp4", "mpeg", "mpg", "oga",
+                                "ogg", "opus", "ts", "wav", "webm", "wmv"
+                            )
+                            val output = if (reportedOutputIsValid) {
+                                requireNotNull(reportedOutput)
+                            } else {
+                                val discovered = outputDirectory.listFiles()
+                                    ?.filter { candidate ->
+                                        if (!candidate.isFile || candidate.length() <= 0L) {
+                                            false
+                                        } else {
+                                            val extension = candidate.extension.lowercase()
+                                            val previous = filesBefore[candidate.canonicalPath]
+                                            val changed = previous == null ||
+                                                previous.first != candidate.length() ||
+                                                previous.second != candidate.lastModified()
+                                            extension in mediaExtensions && changed
+                                        }
+                                    }
+                                    ?.maxByOrNull { it.lastModified() }
+                                discovered ?: run {
+                                    val directoryFiles = outputDirectory.listFiles()
+                                        ?.joinToString { file ->
+                                            "${file.name}(${file.length()} bytes)"
+                                        } ?: "unavailable"
+                                    val stdoutTail = response.out.takeLast(1200).replace("\n", " | ")
+                                    throw IllegalStateException(
+                                        "yt-dlp finished but no non-empty media file was found. " +
+                                            "reportedPath=${reportedPath ?: "none"}; " +
+                                            "directory=${outputDirectory.absolutePath}; " +
+                                            "files=[$directoryFiles]; output=$stdoutTail"
+                                    )
+                                }
+                            }
                             if (!output.path.startsWith(appRoot.path + File.separator)) {
-                                throw IllegalStateException("yt-dlp reported a file outside Easy Download's private storage.")
+                                throw IllegalStateException("yt-dlp output is outside Easy Download's private storage.")
                             }
                             if (!output.isFile || output.length() <= 0L) {
-                                throw IllegalStateException("yt-dlp reported an output file that is missing or empty.")
+                                throw IllegalStateException("yt-dlp output is missing or empty: ${output.absolutePath}")
                             }
                             runOnUiThread { result.success(output.absolutePath) }
                         } catch (error: Exception) {
