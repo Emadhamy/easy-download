@@ -25,6 +25,20 @@ class MainActivity : FlutterActivity() {
     private var pendingDirectoryResult: MethodChannel.Result? = null
     private val ytDlpExecutor = Executors.newSingleThreadExecutor()
 
+    // The bundled yt-dlp binary is present immediately after init(), but the
+    // library's versionName()/version() only read metadata written by its updater.
+    // Run the embedded binary itself so a fresh install is correctly recognized.
+    private fun installedYtDlpVersion(): String {
+        val request = YoutubeDLRequest(emptyList()).apply {
+            addCommands(listOf("--version"))
+        }
+        val version = YoutubeDL.getInstance().execute(request).out.trim()
+        if (version.isBlank()) {
+            throw IllegalStateException("The bundled yt-dlp executable did not return a version.")
+        }
+        return version.lineSequence().first().trim()
+    }
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         captureSharedIntent(intent)
@@ -249,8 +263,7 @@ class MainActivity : FlutterActivity() {
                     "initialize" -> ytDlpExecutor.execute {
                         try {
                             YoutubeDL.getInstance().init(applicationContext)
-                            val version = YoutubeDL.getInstance().versionName(applicationContext)
-                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            val version = installedYtDlpVersion()
                             runOnUiThread {
                                 result.success(mapOf("initialized" to true, "version" to version))
                             }
@@ -263,8 +276,7 @@ class MainActivity : FlutterActivity() {
                     "version" -> ytDlpExecutor.execute {
                         try {
                             YoutubeDL.getInstance().init(applicationContext)
-                            val version = YoutubeDL.getInstance().versionName(applicationContext)
-                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            val version = installedYtDlpVersion()
                             runOnUiThread { result.success(version) }
                         } catch (error: Exception) {
                             runOnUiThread {
@@ -287,8 +299,7 @@ class MainActivity : FlutterActivity() {
                             val payload = connection.inputStream.bufferedReader().use { it.readText() }
                             val latest = JSONObject(payload).optString("tag_name")
                             if (latest.isBlank()) throw IllegalStateException("The official release did not include a version tag.")
-                            val installed = YoutubeDL.getInstance().versionName(applicationContext)
-                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            val installed = installedYtDlpVersion()
                             runOnUiThread {
                                 result.success(mapOf("latestVersion" to latest, "installedVersion" to installed))
                             }
@@ -307,8 +318,7 @@ class MainActivity : FlutterActivity() {
                                 applicationContext,
                                 YoutubeDL.UpdateChannel.STABLE
                             )
-                            val version = YoutubeDL.getInstance().versionName(applicationContext)
-                                ?: YoutubeDL.getInstance().version(applicationContext)
+                            val version = installedYtDlpVersion()
                             runOnUiThread {
                                 result.success(
                                     mapOf(
