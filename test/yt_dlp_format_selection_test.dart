@@ -14,6 +14,11 @@ void main() {
       expect(YtDlpFormatSelection.videoWithAudio(source).map((f) => f['formatId']), ['best']);
       expect(YtDlpFormatSelection.audioOnly(source).map((f) => f['formatId']), ['audio']);
     });
+    test('includes video-only streams for Android FFmpeg merging', () {
+      final videos = YtDlpFormatSelection.videoWithMergeSupport(source);
+      expect(videos.map((f) => f['formatId']), ['best', 'video-only']);
+      expect(YtDlpFormatSelection.byId(videos, 'video-only'), isNotNull);
+    });
     test('returns the exact chosen format ID', () {
       final videos = YtDlpFormatSelection.videoWithAudio(source);
       expect(YtDlpFormatSelection.byId(videos, 'best'), videos.single);

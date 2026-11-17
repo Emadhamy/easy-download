@@ -2171,7 +2171,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
               final reported = (decoded['formats'] as List<dynamic>? ?? [])
                   .whereType<Map<String, dynamic>>()
                   .toList();
-              final available = YtDlpFormatSelection.videoWithAudio(reported);
+              final available = Platform.isAndroid
+                  ? YtDlpFormatSelection.videoWithMergeSupport(reported)
+                  : YtDlpFormatSelection.videoWithAudio(reported);
               final availableAudio = YtDlpFormatSelection.audioOnly(reported);
               if (available.isEmpty && availableAudio.isEmpty) {
                 throw StateError('This source did not report a directly downloadable video or audio format.');
@@ -2201,6 +2203,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             final size = (format['filesize'] ?? format['filesizeApprox']) as num?;
             final details = <String>[resolution, extension.toUpperCase()];
             if (fps != null) details.add('${fps.toStringAsFixed(0)} FPS');
+            if (format['hasAudio'] != true) details.add('Merge best audio');
             if (size != null) details.add(_formatYtDlpBytes(size.toInt()));
             return details.join(' • ');
           }
@@ -2321,7 +2324,9 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                           Navigator.of(dialogContext).pop(_VideoFormatSelection(
                             sourceUrl: Uri.parse(inspectedSourceUrl!),
                             title: sourceInfo!['title'] as String? ?? 'video',
-                            formatId: selectedFormatId!,
+                            formatId: Platform.isAndroid && selected['hasAudio'] != true
+                                ? '${selectedFormatId!}+bestaudio'
+                                : selectedFormatId!,
                             extension: extension.isEmpty ? 'mp4' : extension,
                           ));
                         }
