@@ -2325,7 +2325,6 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                               .toLowerCase()
                               .replaceAll(RegExp(r'[^a-z0-9]'), '');
                           FocusManager.instance.primaryFocus?.unfocus();
-                          FocusManager.instance.primaryFocus?.unfocus();
                           Navigator.of(dialogContext).pop(_VideoFormatSelection(
                             sourceUrl: Uri.parse(inspectedSourceUrl!),
                             title: sourceInfo!['title'] as String? ?? 'video',
@@ -2347,6 +2346,7 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                           final extension = (selected['ext'] as String? ?? 'm4a')
                               .toLowerCase()
                               .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                          FocusManager.instance.primaryFocus?.unfocus();
                           Navigator.of(dialogContext).pop(_VideoFormatSelection(
                             sourceUrl: Uri.parse(inspectedSourceUrl!),
                             title: sourceInfo!['title'] as String? ?? 'audio',
