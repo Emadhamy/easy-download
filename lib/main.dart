@@ -2310,7 +2310,10 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
+                onPressed: () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  Navigator.of(dialogContext).pop();
+                },
                 child: const Text('Cancel'),
               ),
               if (formats.isNotEmpty)
@@ -2321,6 +2324,8 @@ class _DownloadHomePageState extends State<DownloadHomePage> {
                           final extension = (selected['ext'] as String? ?? 'mp4')
                               .toLowerCase()
                               .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          FocusManager.instance.primaryFocus?.unfocus();
                           Navigator.of(dialogContext).pop(_VideoFormatSelection(
                             sourceUrl: Uri.parse(inspectedSourceUrl!),
                             title: sourceInfo!['title'] as String? ?? 'video',
